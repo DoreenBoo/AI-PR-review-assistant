@@ -120,6 +120,28 @@ index c6b9e31..fd821ac 100644
    sendAnalytics() {`
 };
 
+function decodeGitOctalEscapes(diffText: string): string {
+  return diffText.replace(
+    /"([^"]*\\[0-7]{3}[^"]*)"/g,
+    (match) => {
+      const inner = match.slice(1, -1);
+      const bytes: number[] = [];
+      let i = 0;
+      while (i < inner.length) {
+        if (inner[i] === '\\' && /^[0-7]{3}$/.test(inner.slice(i + 1, i + 4))) {
+          bytes.push(parseInt(inner.slice(i + 1, i + 4), 8));
+          i += 4;
+        } else {
+          bytes.push(inner.charCodeAt(i));
+          i++;
+        }
+      }
+      const decoder = new TextDecoder('utf-8');
+      return '"' + decoder.decode(new Uint8Array(bytes)) + '"';
+    }
+  );
+}
+
 export default function App() {
   const [prUrl, setPrUrl] = useState("");
   const [pastedDiff, setPastedDiff] = useState("");
@@ -135,7 +157,7 @@ export default function App() {
 
   // Parse the Unified Patch / Diff
   const parsedFiles = useMemo(() => {
-    const diffText = reviewResult?.diff || "";
+    const diffText = decodeGitOctalEscapes(reviewResult?.diff || "");
     const filesList: {
       fileName: string;
       lines: {
@@ -505,6 +527,16 @@ export default function App() {
               className="flex flex-col gap-6"
               id="review_results_block"
             >
+              
+              {reviewResult.fetchError && (
+                <div className="p-4 rounded-md bg-amber-950/30 border border-amber-500/30 flex items-start gap-3 text-xs" id="fetch_warning">
+                  <AlertTriangle className="w-5 h-5 text-amber-400 shrink-0 mt-0.5" />
+                  <div>
+                    <strong className="font-semibold text-amber-400 block mb-1">获取 PR 失败，正在使用演示数据</strong>
+                    <p className="font-sans text-[11px] text-zinc-400">{reviewResult.fetchError.message}</p>
+                  </div>
+                </div>
+              )}
               
               {/* TWO COLUMN SIDEBAR & COMPARATOR LAYOUT */}
               <div className="grid grid-cols-1 lg:grid-cols-12 gap-6" id="overview_grids">
