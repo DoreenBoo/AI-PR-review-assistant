@@ -1,0 +1,6 @@
+{
+  "name": "AI PR Review Assistant",
+  "description": "An interactive, high-fidelity dashboard for reviewing Git diffs and GitHub Pull Requests with deep visual annotations and contextual AI reviews.",
+  "requestFramePermissions": [],
+  "majorCapabilities": ["MAJOR_CAPABILITY_SERVER_SIDE_GEMINI_API"]
+}
