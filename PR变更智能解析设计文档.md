@@ -89,29 +89,54 @@ function parseWithAST(code: string) {
 
 #### 3. 业务语义提取模块
 
+详见 [提示词工程设计文档](./docs/prompt-engineering-design.md)
+
+**设计策略：三层防御体系**
+
+| 层级 | 机制 | 触发条件 |
+|------|------|---------|
+| Layer 1 | 两阶段分析管线 + 推理链引导 | Gemini 正常可用 |
+| Layer 2 | `hasEmptySemantics` 检测 + `inferSemanticsFromDiff()` | Gemini 返回空语义字段 |
+| Layer 3 | 纯本地启发式推理 | Gemini 完全不可用（API Key缺失/网络断开/超时） |
+
+**两阶段分析管线**：将 prompt 重构为 `Phase 1: 业务语义分析 → Phase 2: 代码审计` 的强制顺序执行流程。Phase 1 包含 5 步推理链（技术动作 → 业务动机 → 影响范围 → 风险评级 → 意图输出），确保语义字段在 Gemini 的注意力预算最充足时被处理。
+
+**"软约束 + 硬兜底"**：语义字段不加入 schema `required`（避免 Gemini 推断失败时整请求报错），通过自然语言强制声明 + Schema 描述强化（【必填-Phase1】前缀、示例注入、禁止性约束）替代 schema 硬约束，空字段由 `inferSemanticsFromDiff()` 兜底。
+
+**本地推理引擎** `inferSemanticsFromDiff()`：22 项模块关键词映射表（auth→认证模块、middleware→中间件...）、17 项风险正则模式（高危 10 + 中危 7）、基于新增/删除比例的意图推断算法（7 种意图类别），在无 Gemini 时也能生成有意义的语义。
+
 ```
 async function extractBusinessSemantics(metadata, structuredDiff) {
-  const prompt = `
-    基于PR信息提取变更意图：
-    标题：${metadata.title}
-    描述：${metadata.description}
-    变更文件：${structuredDiff.files.map(f => f.fileName).join(', ')}
-    输出JSON格式：{ "intent": "一句话描述", "impactScope": ["影响点1", "影响点2"] }
-  `;
-  
+  // 两阶段提示词: Phase1 语义 → Phase2 审计
+  const systemInstruction = "PHASE 1 — BUSINESS SEMANTIC ANALYSIS...\nPHASE 2 — CODE QUALITY AUDIT...";
+  const userPrompt = "PHASE 1 — First, analyze the BUSINESS CONTEXT...\nPHASE 2 — Then perform the code audit...\nCRITICAL: Phase 1 output is REQUIRED";
+
   const response = await geminiClient.generateContent({
     model: "gemini-3.5-flash",
-    contents: prompt,
-    config: { temperature: 0.1, responseMimeType: "application/json" }
+    contents: userPrompt,
+    config: {
+      systemInstruction,
+      temperature: 0.1,
+      responseMimeType: "application/json",
+      responseSchema: { /* 语义字段排首位 + 【必填-Phase1】描述 */ },
+    }
   });
-  return JSON.parse(response.text);
+
+  // 空字段自动回退到本地推理
+  const parsed = JSON.parse(response.text);
+  if (!parsed.businessIntent || !parsed.impactScope?.length) {
+    return inferSemanticsFromDiff(targetDiff, codeBlocks);
+  }
+  return { intent: parsed.businessIntent, impactScope: parsed.impactScope, riskLevel: parsed.riskLevel };
 }
 ```
 
 **关键技术**：
 
-- 上下文注入：整合元数据+结构化Diff
+- 上下文注入：整合元数据 + 结构化Diff
 - 低温配置：`temperature=0.1`确保输出稳定性
+- 双层锚定：SystemInstruction (how) + UserPrompt (what) 语义一致、结构对应
+- 零依赖代理：`undici` ProxyAgent 全局拦截 fetch 支持 HTTPS_PROXY 环境变量
 
 ### 四、前端交互增强
 
