@@ -3,8 +3,27 @@ import path from "path";
 import { createServer as createViteServer } from "vite";
 import { GoogleGenAI, Type } from "@google/genai";
 import dotenv from "dotenv";
+import fs from "fs";
+import { ProxyAgent, setGlobalDispatcher } from "undici";
 
 dotenv.config();
+if (!process.env.GEMINI_API_KEY) {
+  const altEnvPath = path.resolve(".env.example");
+  if (fs.existsSync(altEnvPath)) {
+    dotenv.config({ path: altEnvPath });
+    console.log("Loaded environment variables from .env.example fallback");
+  }
+}
+
+const proxyUrl = process.env.HTTPS_PROXY || process.env.https_proxy || process.env.HTTP_PROXY || process.env.http_proxy;
+if (proxyUrl) {
+  try {
+    setGlobalDispatcher(new ProxyAgent({ uri: proxyUrl }));
+    console.log(`HTTPS Proxy enabled: ${proxyUrl}`);
+  } catch (e) {
+    console.warn("Failed to configure HTTPS proxy:", e);
+  }
+}
 
 const app = express();
 const PORT = 3000;
@@ -149,6 +168,235 @@ function getGeminiClient(): GoogleGenAI {
   return aiClient;
 }
 
+async function fetchPrMetadata(owner: string, repo: string, pullNumber: string): Promise<{
+  owner: string; repo: string; pullNumber: number;
+  title: string; description: string;
+  author: string; createdAt: string;
+  linkedIssues: { number: number; title: string }[];
+}> {
+  const token = process.env.GITHUB_TOKEN;
+  const headers: Record<string, string> = {
+    "Accept": "application/vnd.github.v3+json",
+    "User-Agent": "AI-Studio-PR-Reviewer",
+  };
+  if (token) {
+    headers["Authorization"] = `Bearer ${token}`;
+  }
+
+  const prUrl = `https://api.github.com/repos/${owner}/${repo}/pulls/${pullNumber}`;
+  const prRes = await fetchWithTimeout(prUrl, { headers }, 10000);
+  if (!prRes.ok) {
+    throw new Error(`GitHub API responded with status ${prRes.status}`);
+  }
+
+  const prData: any = await prRes.json();
+  const prNumber = parseInt(pullNumber, 10);
+
+  const issueRefs = [...((prData.body || '') as string).matchAll(/#(\d+)/g)];
+  const linkedIssues = issueRefs.map(m => ({ number: parseInt(m[1]), title: '' }));
+
+  return {
+    owner,
+    repo,
+    pullNumber: prNumber,
+    title: prData.title || '',
+    description: (prData.body || '').substring(0, 2000),
+    author: prData.user?.login || '',
+    createdAt: prData.created_at || '',
+    linkedIssues,
+  };
+}
+
+function detectCodeBlocks(diffText: string): {
+  type: 'function' | 'class' | 'interface' | 'export';
+  name: string;
+  filePath: string;
+  lineNumber: number;
+}[] {
+  const blocks: {
+    type: 'function' | 'class' | 'interface' | 'export';
+    name: string;
+    filePath: string;
+    lineNumber: number;
+  }[] = [];
+  const lines = diffText.split('\n');
+  let currentFile = '';
+  let newLineNum = 0;
+
+  const patterns: { type: 'function' | 'class' | 'interface' | 'export'; regex: RegExp }[] = [
+    { type: 'function',  regex: /^\+\s*(?:export\s+)?(?:async\s+)?function\s+(\w+)/ },
+    { type: 'function',  regex: /^\+\s*(?:export\s+)?(?:static\s+)?(?:async\s+)?(\w+)\s*\([^)]*\)\s*\{?\s*$/ },
+    { type: 'function',  regex: /^\+\s*(?:export\s+)?(?:const|let|var)\s+(\w+)\s*=\s*(?:async\s+)?\([^)]*\)\s*=>/ },
+    { type: 'class',     regex: /^\+\s*(?:export\s+)?(?:abstract\s+)?class\s+(\w+)/ },
+    { type: 'interface', regex: /^\+\s*(?:export\s+)?interface\s+(\w+)/ },
+    { type: 'export',    regex: /^\+\s*export\s+(?:default\s+)?(?:function|class|const|let|var)\s+(\w+)/ },
+  ];
+
+  for (const line of lines) {
+    if (line.startsWith('diff --git ')) {
+      const match = line.match(/b\/(.+)$/);
+      currentFile = match ? match[1] : '';
+      newLineNum = 0;
+      continue;
+    }
+
+    if (line.startsWith('@@ -')) {
+      const match = line.match(/\+(\d+)/);
+      newLineNum = match ? parseInt(match[1], 10) - 1 : 0;
+      continue;
+    }
+
+    if (!currentFile) continue;
+
+    if (line.startsWith('+')) {
+      newLineNum++;
+      for (const p of patterns) {
+        const match = line.match(p.regex);
+        if (match) {
+          const dup = blocks.find(b => b.filePath === currentFile && b.lineNumber === newLineNum);
+          if (!dup) {
+            blocks.push({ type: p.type, name: match[1], filePath: currentFile, lineNumber: newLineNum });
+            break;
+          }
+        }
+      }
+    } else if (line.startsWith(' ')) {
+      newLineNum++;
+    }
+  }
+
+  return blocks;
+}
+
+function inferSemanticsFromDiff(diffText: string, codeBlocks: ReturnType<typeof detectCodeBlocks>): {
+  intent: string;
+  impactScope: string[];
+  riskLevel: 'low' | 'medium' | 'high';
+} {
+  const lines = diffText.split('\n');
+
+  const filePaths: string[] = [];
+  for (const line of lines) {
+    if (line.startsWith('+++ b/')) {
+      const p = line.slice(6);
+      if (p && p !== '/dev/null') filePaths.push(p);
+    } else if (line.startsWith('--- a/')) {
+      const p = line.slice(6);
+      if (p && p !== '/dev/null' && !filePaths.includes(p)) filePaths.push(p);
+    }
+  }
+
+  const dirNames = [...new Set(filePaths.map(p => {
+    const parts = p.split('/');
+    if (parts.length >= 3) return parts.slice(1, 3).join('/');
+    if (parts.length >= 2) return parts[0];
+    return p.replace(/\.[^.]+$/, '');
+  }))];
+
+  const moduleKeywords: Record<string, string> = {
+    'auth': '认证模块',
+    'login': '登录模块',
+    'user': '用户模块',
+    'api': 'API接口',
+    'db': '数据库',
+    'database': '数据库',
+    'config': '系统配置',
+    'router': '路由层',
+    'middleware': '中间件',
+    'component': '前端组件',
+    'util': '工具函数',
+    'test': '测试模块',
+    'ci': 'CI/CD流水线',
+    'docker': '容器部署',
+    'package': '依赖管理',
+    'migration': '数据迁移',
+    'schema': '数据模型',
+    'validator': '校验层',
+    'service': '业务服务层',
+    'controller': '控制器层',
+    'model': '数据模型层',
+  };
+
+  const impactScope: string[] = [];
+  for (const dir of dirNames) {
+    for (const [key, label] of Object.entries(moduleKeywords)) {
+      if (dir.toLowerCase().includes(key) && !impactScope.includes(label)) {
+        impactScope.push(label);
+      }
+    }
+  }
+  if (impactScope.length === 0 && filePaths.length > 0) {
+    const sample = filePaths[0].split('/');
+    if (sample.length >= 2) impactScope.push(sample[0]);
+    else impactScope.push(filePaths[0].replace(/\.[^.]+$/, ''));
+  }
+
+  const addedCount = lines.filter(l => l.startsWith('+') && !l.startsWith('+++')).length;
+  const removedCount = lines.filter(l => l.startsWith('-') && !l.startsWith('---')).length;
+
+  let riskLevel: 'low' | 'medium' | 'high' = 'low';
+
+  const highRiskPatterns = [
+    /\.executeRaw\s*\(/i, /\bexec\s*\(\s*['"]/i,
+    /password\s*[=:]\s*['"][^'"]+['"](?!\s*$)/i,
+    /api[_-]?key\s*[=:]\s*['"][^'"]+['"]/i,
+    /secret\s*[=:]\s*['"][^'"]+['"]/i,
+    /token\s*[=:]\s*['"][^'"]+['"]/i,
+    /jwt\.sign\s*\([^)]*['"][^'"]+['"]/i,
+    /innerHTML\s*=/i, /dangerouslySetInnerHTML/i,
+    /eval\s*\(/i, /Function\s*\(/i,
+    /\$\{.*(?:username|password|query|sql)\}/i,
+  ];
+
+  const mediumRiskPatterns = [
+    /setInterval\s*\(/, /setTimeout\s*\(/,
+    /new\s+Promise\s*\(/, /async\s+function/,
+    /delete\s+\w+\.\w+/, /\.remove\(\)/,
+    /TODO|FIXME|HACK|XXX/,
+    /\.catch\s*\(/, /throw\s+new\s+Error/,
+  ];
+
+  for (const line of lines) {
+    if (line.startsWith('+')) {
+      for (const pattern of highRiskPatterns) {
+        if (pattern.test(line)) {
+          riskLevel = 'high';
+          break;
+        }
+      }
+      if (riskLevel === 'high') break;
+
+      for (const pattern of mediumRiskPatterns) {
+        if (pattern.test(line)) {
+          riskLevel = 'medium';
+        }
+      }
+    }
+  }
+
+  const newFiles = filePaths.filter(p => !lines.some(l => l.startsWith('--- a/' + p)));
+  const deletedFiles = lines.filter(l => l.startsWith('--- a/') && lines.some(l2 => l2.startsWith('+++ b//dev/null'))).length;
+
+  let intent = '';
+  if (deletedFiles > 0 && addedCount < 3) {
+    intent = '清理项目中的废弃代码和文件';
+  } else if (newFiles.length > 0 && removedCount < 3) {
+    intent = `新增${newFiles.length > 1 ? '多' : ''}个功能模块`;
+  } else if (riskLevel === 'high') {
+    intent = '代码变更中存在安全风险项，建议重点审查';
+  } else if (codeBlocks.length > 0) {
+    intent = `更新${codeBlocks.length}处代码逻辑`;
+  } else if (addedCount > removedCount * 2) {
+    intent = '扩展功能实现，新增业务逻辑';
+  } else if (removedCount > addedCount * 2) {
+    intent = '精简代码结构，移除冗余逻辑';
+  } else {
+    intent = '常规代码变更与优化';
+  }
+
+  return { intent, impactScope, riskLevel };
+}
+
 // High-fidelity fallback model data to guarantee 100% stable presentation
 const MOCK_FALLBACK_RESULT = {
   summary: "正在使用容错兜底模式呈现本次审计结果：发现多处代码安全架构与可降等级隐患，核心瓶颈聚焦于凭证硬编码与 SQL 拼接逻辑，建议立刻修复。",
@@ -269,12 +517,33 @@ function normalizeReviewResult(rawJson: any, targetDiff: string): any {
   };
 }
 
+app.post("/api/pr/metadata", async (req, res): Promise<any> => {
+  const url = req.body.githubUrl || req.body.url;
+  if (!url) {
+    return res.status(400).json({ error: "Please provide a GitHub PR URL." });
+  }
+  const parsed = parseGithubPr(url);
+  if (!parsed) {
+    return res.status(400).json({ error: "Invalid GitHub PR URL." });
+  }
+  try {
+    const metadata = await fetchPrMetadata(parsed.owner, parsed.repo, parsed.pullNumber);
+    return res.json(metadata);
+  } catch (e: any) {
+    return res.status(500).json({
+      error: "Failed to fetch PR metadata from GitHub.",
+      details: e.message,
+    });
+  }
+});
+
 // AI PR Review endpoint
 app.post("/api/review", async (req, res): Promise<any> => {
   const url = req.body.githubUrl || req.body.url;
   const { diff } = req.body;
   let targetDiff = diff || "";
   const hasPastedDiff = !!diff && diff.trim().length > 0;
+  let metadataPromise: Promise<any> | null = null;
 
   if (url && !hasPastedDiff) {
     const parsed = parseGithubPr(url);
@@ -285,6 +554,10 @@ app.post("/api/review", async (req, res): Promise<any> => {
     }
 
     const { owner, repo, pullNumber } = parsed;
+    metadataPromise = fetchPrMetadata(owner, repo, pullNumber).catch((e) => {
+      console.warn("PR metadata fetch failed (non-blocking):", e.message);
+      return null;
+    });
     // Download the raw diff format directly from GitHub's raw diff host
     const diffUrls = [
       `https://patch-diff.githubusercontent.com/raw/${owner}/${repo}/pull/${pullNumber}.diff`,
@@ -334,6 +607,9 @@ app.post("/api/review", async (req, res): Promise<any> => {
       const fallbackResult = { ...MOCK_FALLBACK_RESULT };
       fallbackResult.diff = cleanDiffContent(`--- a/src/auth.ts\n+++ b/src/auth.ts\n@@ -10,12 +10,18 @@\n-  return null;\n+  const query = \`SELECT * FROM users WHERE username = '\${username}' AND password_hash = '\${passwordHash}' LIMIT 1\`;\n+  const result = await db.executeRaw(query);\n+  return result[0];\n-  return jwt.sign({ userId, expiry }, process.env.JWT_SECRET!);\n+  return jwt.sign({ userId, expiry }, "default_insecure_key_123");`);
       
+      (fallbackResult as any).codeBlocks = detectCodeBlocks(fallbackResult.diff);
+      (fallbackResult as any).semantics = inferSemanticsFromDiff(fallbackResult.diff, (fallbackResult as any).codeBlocks);
+
       let errorMessage = "GitHub PR 获取失败，正在使用演示数据";
       if (errorType === 'auth') {
         errorMessage = "仓库可能是私有仓库，请尝试手动粘贴 diff 内容";
@@ -344,13 +620,20 @@ app.post("/api/review", async (req, res): Promise<any> => {
       }
       
       console.warn(`[${errorType.toUpperCase()}] ${errorMessage}`);
+
+      let metadata: any = null;
+      if (metadataPromise) {
+        metadata = await metadataPromise;
+      }
+
       return res.json({
         ...fallbackResult,
         fetchError: {
           type: errorType,
           message: errorMessage,
           details: fetchError
-        }
+        },
+        ...(metadata ? { metadata } : {}),
       });
     }
   }
@@ -369,6 +652,8 @@ app.post("/api/review", async (req, res): Promise<any> => {
 
   targetDiff = cleanDiffContent(targetDiff);
 
+  const codeBlocks = detectCodeBlocks(targetDiff);
+
   // Cap diff length to prevent token overflows
   const isDiffTruncated = targetDiff.length > 50000;
   if (isDiffTruncated) {
@@ -378,21 +663,89 @@ app.post("/api/review", async (req, res): Promise<any> => {
   try {
     const client = getGeminiClient();
 
-    const systemInstruction = `You are an elite, production-grade Tech Lead and Security Code Auditor.
-Your singular objective is to review code changes (Git diffs) and output a highly actionable, structured audit response in formal Chinese.
+    const systemInstruction = `You are an elite production-grade Tech Lead performing code review.
+You MUST follow a strict two-phase analysis pipeline. Never skip a phase.
 
-For each significant issue (such as SQL Injections, security hazards, leaked credentials, rendering loops, infinite re-renders in hooks, memory leaks, deep callback nesting, or bad complexity), you MUST generate an inline comment pointing out:
-- filePath: The exact path of the file as written in the git diff (e.g., 'src/auth.ts').
-- lineNumber: An approximate 1-based target line number in the new file where the issue/line resides.
-- originalContent: A unique line of code from the added lines in the diff (marked with '+') that is causing the issue.
-- description: Explanation of the direct risk or issue in a professional tech tone.
-- suggestion: A direct code block suggestion demonstrating how to rewrite the code safely/elegantly. Ensure it is a complete valid Code suggestion.
-- severity: 'high' (critical security / crash bug), 'medium' (performance or strong design smell), or 'low' (stylistic/readability).
+==============================
+PHASE 1 — BUSINESS SEMANTIC ANALYSIS
+==============================
+Execute this phase FIRST, before any code audit. Reason step-by-step:
 
-Rate the entire diff performance overall across 4 metrics (0-100): security, readability, performance, robustness. Be realistic: code with severe vulnerability gets security = 0-35. Output a concise summary and 3 key takeaways.`;
+Step 1.1 — Identify the technical action:
+  What files were modified? Was code added, removed, or refactored?
 
-    const userPrompt = `Please audit this Git Diff and provide a comprehensive review in JSON format matching the schema rules:
-    
+Step 1.2 — Infer the business motivation:
+  Why was this change made? Choose the most likely category:
+  • 安全漏洞修复 (security fix)
+  • 新功能开发 (new feature)
+  • 代码重构 (refactor / pay tech debt)
+  • 配置变更 (config change)
+  • 依赖升级 (dependency update)
+  • 文档更新 (documentation)
+  • 性能优化 (performance optimization)
+  • 缺陷修复 (bug fix)
+
+Step 1.3 — Determine impact scope:
+  Which functional areas / system modules are affected? Be specific.
+  Examples: ["用户认证模块","JWT令牌签发"] / ["数据库查询层","API中间件"] / ["前端表单校验","文件上传"]
+
+Step 1.4 — Assess risk level:
+  "high" — SQL注入, 认证绕过, 凭证泄露, XSS跨站脚本, 系统崩溃风险
+  "medium" — 性能退化, 竞态条件, 废弃API调用, 架构坏味, 内存泄漏
+  "low" — 无逻辑变更的重构, 文档/注释修正, 版本号升级, 格式调整
+
+Step 1.5 — Produce businessIntent (one concise Chinese sentence):
+  Template: "[动作] + [对象] + [目的]"
+  Good: "修复登录模块SQL注入漏洞"
+  Good: "新增用户头像上传与裁剪功能"
+  Good: "重构支付回调接口提升异常处理能力"
+  Bad: "修改了一些代码" (too vague)
+  Bad: "更新文件" (no purpose stated)
+
+After completing Phase 1, you MUST populate these three output fields:
+  "businessIntent": "<your inference from Step 1.5>"
+  "impactScope": ["<area1>", "<area2>", ...]
+  "riskLevel": "high" | "medium" | "low"
+
+==============================
+PHASE 2 — CODE QUALITY AUDIT
+==============================
+Only after Phase 1 is complete, audit the code for:
+
+2.1 — SECURITY VULNERABILITIES
+  SQL injection, XSS, hardcoded secrets/keys/tokens, authentication bypass,
+  crypto flaws (weak ciphers, broken randomness), path traversal, IDOR
+
+2.2 — CODE QUALITY ISSUES
+  Race conditions, memory/resource leaks, missing error handling,
+  deep nesting (>4 levels), O(n²) or worse complexity, dead code
+
+2.3 — SCORING (0-100, be strict)
+  • security — any SQL injection or hardcoded secret → score ≤ 35
+  • readability — naming, structure, comments, consistency
+  • performance — algorithmic efficiency, N+1 queries, unnecessary loops
+  • robustness — error handling, input validation, edge cases, null safety
+
+2.4 — OUTPUT
+  summary: One-sentence Chinese audit conclusion
+  badge: Category label, e.g. "安全风险修复" / "架构重构" / "功能迭代"
+  overallScore: Integer 0-100
+  keyFindings: Array of 2-3 critical findings in Chinese
+  comments: Array of { filePath, line, originalContent, issue, suggestion, severity }`;
+
+    const userPrompt = `Execute the two-phase code review pipeline on the following Git Diff.
+
+PHASE 1 — First, analyze the BUSINESS CONTEXT of this change:
+  • Read every file path and code hunk to understand WHAT was modified.
+  • Categorize the motivation: security fix | new feature | refactor | config | dependency | docs | performance | bugfix.
+  • Identify which system modules / functional areas are touched.
+  • Rate the operational risk as "high" | "medium" | "low".
+  • Produce a one-sentence Chinese businessIntent following the template: "[动作] + [对象] + [目的]"
+
+PHASE 2 — Then perform the full security and code quality audit.
+
+CRITICAL: The Phase 1 output (businessIntent, impactScope, riskLevel) is REQUIRED and must never be omitted or left empty.
+
 --- GIT DIFF START ---
 ${targetDiff}
 --- GIT DIFF END ---`;
@@ -407,46 +760,59 @@ ${targetDiff}
         responseSchema: {
           type: Type.OBJECT,
           properties: {
+            businessIntent: {
+              type: Type.STRING,
+              description: "【必填-Phase1】一言中文描述本次PR变更的业务意图。模板:'[动作]+[对象]+[目的]'。示例:'修复登录模块SQL注入漏洞'/'新增用户头像上传功能'/'重构支付回调异常处理'。禁止输出空字符串或过于笼统的描述如'修改代码'。",
+            },
+            impactScope: {
+              type: Type.ARRAY,
+              items: { type: Type.STRING },
+              description: "【必填-Phase1】本次变更可能影响的功能模块列表。示例:['用户认证模块','JWT令牌签发']/['数据库查询层','API中间件']/['前端表单校验','文件上传']。至少包含1个元素，禁止输出空数组。",
+            },
+            riskLevel: {
+              type: Type.STRING,
+              description: "【必填-Phase1】变更风险等级:'high'(SQL注入/认证绕过/凭证泄露/XSS/崩溃风险),'medium'(性能退化/竞态/废弃API/架构坏味/内存泄漏),'low'(无逻辑变更的重构/文档修正/版本升级/格式调整)。",
+            },
             summary: {
               type: Type.STRING,
-              description: "A professional one-sentence Chinese summary of what this code changes and its quality status.",
+              description: "一句中文审计总结，概述本次代码变更的质量状况。",
             },
             badge: {
               type: Type.STRING,
-              description: "A short highlight category for the PR, e.g., '安全风险修复', '重构升级', '内存泄露修复', '依赖升级'.",
+              description: "PR变更分类标签，如:'安全风险修复'/'架构重构'/'功能迭代'/'依赖升级'/'性能优化'。",
             },
             score: {
               type: Type.OBJECT,
-              description: "An object rating metrics from 0 to 100",
+              description: "四项代码质量维度评分(0-100)",
               properties: {
-                security: { type: Type.INTEGER, description: "代码安全性评分 (0-100)" },
-                readability: { type: Type.INTEGER, description: "代码可读性评分 (0-100)" },
-                performance: { type: Type.INTEGER, description: "代码性能表现评分 (0-100)" },
-                robustness: { type: Type.INTEGER, description: "代码健壮性评分 (0-100)" },
+                security: { type: Type.INTEGER, description: "代码安全性评分 (0-100)。存在SQL注入或硬编码密钥则≤35。" },
+                readability: { type: Type.INTEGER, description: "代码可读性评分 (0-100)。命名、结构、注释一致性。" },
+                performance: { type: Type.INTEGER, description: "代码性能评分 (0-100)。算法效率、N+1查询、不必要循环。" },
+                robustness: { type: Type.INTEGER, description: "代码健壮性评分 (0-100)。错误处理、输入校验、边界条件、空值安全。" },
               },
               required: ["security", "readability", "performance", "robustness"],
             },
             overallScore: {
               type: Type.INTEGER,
-              description: "总体质量综合评分 (0-100).",
+              description: "总体质量综合评分 (0-100)。综合security/readability/performance/robustness四项加权得出。",
             },
             keyFindings: {
               type: Type.ARRAY,
               items: { type: Type.STRING },
-              description: "2至3个核心发现、漏洞或建议的列表",
+              description: "2-3条核心发现或建议的中文列表。每条聚焦一个具体问题。",
             },
             comments: {
               type: Type.ARRAY,
-              description: "所有发现的问题与重构批注列表",
+              description: "所有发现的安全漏洞与代码质量问题批注列表。无问题时输出空数组[]。",
               items: {
                 type: Type.OBJECT,
                 properties: {
-                  filePath: { type: Type.STRING, description: "代码文件路径" },
-                  line: { type: Type.INTEGER, description: "在代码段中发生隐患的代码行数（数字值）" },
-                  originalContent: { type: Type.STRING, description: "对应的存在缺陷的代码原文字串行" },
-                  issue: { type: Type.STRING, description: "问题深度剖析与安全风险诊断描述" },
-                  suggestion: { type: Type.STRING, description: "优化或重构后的完整 Markdown 格式代码块建议" },
-                  severity: { type: Type.STRING, description: "严重级别: High | Medium | Low" },
+                  filePath: { type: Type.STRING, description: "存在问题的代码文件路径，如'src/auth.ts'" },
+                  line: { type: Type.INTEGER, description: "问题代码所在的行号（整数）" },
+                  originalContent: { type: Type.STRING, description: "存在缺陷的原始代码行文本" },
+                  issue: { type: Type.STRING, description: "问题的详细中文分析，包括安全隐患或质量风险的诊断" },
+                  suggestion: { type: Type.STRING, description: "优化或修复后的完整代码建议，使用Markdown代码块格式" },
+                  severity: { type: Type.STRING, description: "严重级别: High / Medium / Low" },
                 },
                 required: ["filePath", "line", "originalContent", "issue", "suggestion", "severity"],
               },
@@ -465,12 +831,41 @@ ${targetDiff}
     const parsedJson = JSON.parse(text.trim());
     // Normalize properties mapping them reliably to strict frontend types
     const normalizedResult = normalizeReviewResult(parsedJson, targetDiff);
+    normalizedResult.codeBlocks = codeBlocks;
+    const parsedSemantics = {
+      intent: parsedJson.businessIntent || '',
+      impactScope: Array.isArray(parsedJson.impactScope) ? parsedJson.impactScope : [],
+      riskLevel: (parsedJson.riskLevel && ['low', 'medium', 'high'].includes(parsedJson.riskLevel))
+        ? parsedJson.riskLevel : 'low',
+    };
+
+    const hasEmptySemantics = !parsedSemantics.intent || parsedSemantics.impactScope.length === 0;
+    normalizedResult.semantics = hasEmptySemantics
+      ? inferSemanticsFromDiff(targetDiff, codeBlocks)
+      : parsedSemantics;
+
+    if (metadataPromise) {
+      const metadata = await metadataPromise;
+      if (metadata) {
+        normalizedResult.metadata = metadata;
+      }
+    }
+
     return res.json(normalizedResult);
   } catch (error: any) {
     console.error("AI Review Backend Error, executing Fallback Mock:", error);
-    // Graceful automatic high-fidelity fallback to ensure demonstration system is 100% stable
     const fallbackResult = { ...MOCK_FALLBACK_RESULT };
     fallbackResult.diff = targetDiff;
+    (fallbackResult as any).codeBlocks = codeBlocks;
+    (fallbackResult as any).semantics = inferSemanticsFromDiff(targetDiff, codeBlocks);
+
+    if (metadataPromise) {
+      const metadata = await metadataPromise;
+      if (metadata) {
+        (fallbackResult as any).metadata = metadata;
+      }
+    }
+
     return res.json(fallbackResult);
   }
 });
