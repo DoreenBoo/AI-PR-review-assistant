@@ -11,19 +11,114 @@ const PORT = 3000;
 
 app.use(express.json({ limit: "15mb" }));
 
-// Helper to parse GitHub Pull Request URLs
+function decodeGitOctalEscapes(diffText: string): string {
+  return diffText.replace(
+    /"([^"]*\\[0-7]{3}[^"]*)"/g,
+    (match) => {
+      const inner = match.slice(1, -1);
+      const bytes: number[] = [];
+      let i = 0;
+      while (i < inner.length) {
+        if (inner[i] === '\\' && /^[0-7]{3}$/.test(inner.slice(i + 1, i + 4))) {
+          bytes.push(parseInt(inner.slice(i + 1, i + 4), 8));
+          i += 4;
+        } else {
+          bytes.push(inner.charCodeAt(i));
+          i++;
+        }
+      }
+      const decoder = new TextDecoder('utf-8');
+      return '"' + decoder.decode(new Uint8Array(bytes)) + '"';
+    }
+  );
+}
+
+function cleanDiffContent(diffText: string): string {
+  let cleaned = decodeGitOctalEscapes(diffText);
+  cleaned = cleaned.replace(/\r\n/g, "\n").replace(/\n{3,}/g, "\n\n").trim();
+  return cleaned;
+}
+
+function isValidUnifiedDiff(diffText: string): boolean {
+  const lines = diffText.trim().split('\n');
+  
+  if (lines.length === 0) return false;
+  
+  if (!lines[0].startsWith('diff --git ')) {
+    return false;
+  }
+  
+  let hasFileHeader = false;
+  let hasHunkHeader = false;
+  let hasContent = false;
+  
+  for (let i = 0; i < lines.length; i++) {
+    const line = lines[i];
+    
+    if (line.startsWith('--- ') || line.startsWith('+++ ')) {
+      hasFileHeader = true;
+    } else if (line.startsWith('@@ -')) {
+      const hunkMatch = line.match(/^@@ -(\d+),?\d* \+(\d+),?\d* @@/);
+      if (hunkMatch) {
+        hasHunkHeader = true;
+      }
+    } else if (line.startsWith('+') || line.startsWith('-') || (line.length > 0 && !line.startsWith(' ') && !line.startsWith('\\'))) {
+      if (hasHunkHeader) {
+        hasContent = true;
+      }
+    }
+  }
+  
+  return hasFileHeader && hasHunkHeader && hasContent;
+}
+
+async function fetchWithTimeout(url: string, options: RequestInit = {}, timeout: number = 10000): Promise<Response> {
+  const controller = new AbortController();
+  const timeoutId = setTimeout(() => controller.abort(), timeout);
+  
+  try {
+    const response = await fetch(url, {
+      ...options,
+      signal: controller.signal,
+    });
+    return response;
+  } finally {
+    clearTimeout(timeoutId);
+  }
+}
+
 function parseGithubPr(urlStr: string) {
   try {
     const url = new URL(urlStr);
     if (!url.hostname.includes("github.com")) return null;
-    const parts = url.pathname.split("/").filter(Boolean);
-    // Standard public PR URL format: github.com/owner/repo/pull/number
+    
+    const pathname = url.pathname.replace(/\/+$/, "");
+    const parts = pathname.split("/").filter(Boolean);
+    
     const pullIndex = parts.indexOf("pull");
-    if (pullIndex !== -1 && parts[pullIndex + 1]) {
+    if (pullIndex === -1 || !parts[pullIndex + 1]) {
+      return null;
+    }
+    
+    const pullNumber = parts[pullIndex + 1];
+    if (!/^\d+$/.test(pullNumber)) {
+      return null;
+    }
+    
+    if (pullIndex >= 2) {
+      const owner = parts[pullIndex - 2];
+      const repo = parts[pullIndex - 1];
+      if (owner && repo) {
+        return { owner, repo, pullNumber };
+      }
+    }
+    
+    const match = urlStr.match(/github\.com\/([^\/]+)\/([^\/]+)\/pull\/(\d+)/);
+    if (match) {
       return {
-        owner: parts[pullIndex - 2],
-        repo: parts[pullIndex - 1],
-        pullNumber: parts[pullIndex + 1],
+        owner: match[1],
+        repo: match[2],
+        pullNumber: match[3],
       };
     }
   } catch (e) {
@@ -176,13 +271,12 @@ function normalizeReviewResult(rawJson: any, targetDiff: string): any {
 
 // AI PR Review endpoint
 app.post("/api/review", async (req, res): Promise<any> => {
-  // Gracefully accept either 'githubUrl' (user input) or 'url' (current React fetch payload)
   const url = req.body.githubUrl || req.body.url;
   const { diff } = req.body;
   let targetDiff = diff || "";
+  const hasPastedDiff = !!diff && diff.trim().length > 0;
 
-  // If a URL was provided, try fetching the diff from GitHub
-  if (url && !targetDiff) {
+  if (url && !hasPastedDiff) {
     const parsed = parseGithubPr(url);
     if (!parsed) {
       return res.status(400).json({
@@ -198,31 +292,66 @@ app.post("/api/review", async (req, res): Promise<any> => {
     ];
 
     let fetchError = "";
+    let errorType: 'network' | 'auth' | 'not_found' | 'other' = 'other';
+    let lastStatus = 0;
+    
     for (const dUrl of diffUrls) {
       try {
-        const fetchRes = await fetch(dUrl, {
+        const fetchRes = await fetchWithTimeout(dUrl, {
           headers: {
             "Accept": "text/plain",
             "User-Agent": "AI-Studio-PR-Reviewer",
           },
-        });
+        }, 15000);
+        
+        lastStatus = fetchRes.status;
+        
         if (fetchRes.ok) {
           targetDiff = await fetchRes.text();
           break;
         } else {
           fetchError = `GitHub responded with status ${fetchRes.status}: ${fetchRes.statusText}`;
+          if (fetchRes.status === 401 || fetchRes.status === 403) {
+            errorType = 'auth';
+          } else if (fetchRes.status === 404) {
+            errorType = 'not_found';
+          }
         }
       } catch (e: any) {
         fetchError = e.message;
+        if (e.name === 'AbortError') {
+          errorType = 'network';
+          fetchError = '请求超时，请检查网络连接';
+        } else if (e.message.includes('fetch') || e.message.includes('network')) {
+          errorType = 'network';
+        }
       }
     }
 
     if (!targetDiff) {
-      // Automatic fallback to Mock data if PR fetching fails or repo is private
       console.warn("Could not fetch diff from GitHub, applying high-fidelity mock data fallback: ", fetchError);
+      
       const fallbackResult = { ...MOCK_FALLBACK_RESULT };
-      fallbackResult.diff = `--- a/src/auth.ts\n+++ b/src/auth.ts\n@@ -10,12 +10,18 @@\n-  return null;\n+  const query = \`SELECT * FROM users WHERE username = '\${username}' AND password_hash = '\${passwordHash}' LIMIT 1\`;\n+  const result = await db.executeRaw(query);\n+  return result[0];\n-  return jwt.sign({ userId, expiry }, process.env.JWT_SECRET!);\n+  return jwt.sign({ userId, expiry }, "default_insecure_key_123");`;
-      return res.json(fallbackResult);
+      fallbackResult.diff = cleanDiffContent(`--- a/src/auth.ts\n+++ b/src/auth.ts\n@@ -10,12 +10,18 @@\n-  return null;\n+  const query = \`SELECT * FROM users WHERE username = '\${username}' AND password_hash = '\${passwordHash}' LIMIT 1\`;\n+  const result = await db.executeRaw(query);\n+  return result[0];\n-  return jwt.sign({ userId, expiry }, process.env.JWT_SECRET!);\n+  return jwt.sign({ userId, expiry }, "default_insecure_key_123");`);
+      
+      let errorMessage = "GitHub PR 获取失败，正在使用演示数据";
+      if (errorType === 'auth') {
+        errorMessage = "仓库可能是私有仓库，请尝试手动粘贴 diff 内容";
+      } else if (errorType === 'network') {
+        errorMessage = "网络连接超时，请检查网络或尝试手动粘贴 diff";
+      } else if (errorType === 'not_found') {
+        errorMessage = "PR 不存在或已被删除，请检查 URL";
+      }
+      
+      console.warn(`[${errorType.toUpperCase()}] ${errorMessage}`);
+      return res.json({
+        ...fallbackResult,
+        fetchError: {
+          type: errorType,
+          message: errorMessage,
+          details: fetchError
+        }
+      });
     }
   }
 
@@ -232,8 +361,13 @@ app.post("/api/review", async (req, res): Promise<any> => {
     });
   }
 
-  // Clean superfluous spaces and normalize empty breaks safely
-  targetDiff = targetDiff.replace(/\r\n/g, "\n").replace(/\n{3,}/g, "\n\n").trim();
+  if (!isValidUnifiedDiff(targetDiff)) {
+    return res.status(400).json({
+      error: "Invalid Git Diff format. Please provide a valid Unified Diff format (starting with 'diff --git').",
+    });
+  }
+
+  targetDiff = cleanDiffContent(targetDiff);
 
   // Cap diff length to prevent token overflows
   const isDiffTruncated = targetDiff.length > 50000;

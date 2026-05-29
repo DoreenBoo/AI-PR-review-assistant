@@ -15,6 +15,12 @@ export interface ReviewComment {
   severity: 'high' | 'medium' | 'low';
 }
 
+export interface FetchError {
+  type: 'network' | 'auth' | 'not_found' | 'other';
+  message: string;
+  details?: string;
+}
+
 export interface PrReviewResult {
   summary: string;
   badge: string;
@@ -23,4 +29,5 @@ export interface PrReviewResult {
   keyFindings: string[];
   comments: ReviewComment[];
   diff: string; // The original public or pasted patch/diff
+  fetchError?: FetchError;
 }
