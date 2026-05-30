@@ -1,0 +1,222 @@
+<h2>雷达图 + 卡片混合 — 详细布局 &amp; 渐进加载</h2>
+<p class="subtitle">中央 SVG 雷达图展示 8 维评分全貌，周围 8 张维度卡片环绕。敏感维度用分层判定标签，工程维度用分数。</p>
+
+<div class="section">
+  <h3>方案 B - 完整布局（静止态）</h3>
+  <div class="mockup">
+    <div class="mockup-header">中央雷达图 + 环绕 8 张维度卡片，顶部审计结论栏，底部变更影响条</div>
+    <div class="mockup-body" style="background:#0a0a0b;padding:20px;font-family:monospace">
+      
+      <!-- 顶部结论栏 -->
+      <div style="background:linear-gradient(135deg,#18181b,#0a0a0b);border:1px solid #27272a;border-radius:10px;padding:10px 14px;margin-bottom:16px;display:flex;align-items:center">
+        <div style="width:4px;height:40px;background:linear-gradient(to bottom,#f43f5e,#f59e0b,#10b981);border-radius:2px;margin-right:12px"></div>
+        <div style="flex:1">
+          <div style="font-size:10px;color:#71717a;text-transform:uppercase;letter-spacing:1px;font-weight:bold;margin-bottom:3px">审计结论</div>
+          <div style="color:white;font-size:11px;font-weight:bold">发现 3 项高危安全漏洞，建议阻断合入并立即修复</div>
+        </div>
+        <div style="text-align:center;margin-left:auto">
+          <div style="font-size:36px;font-weight:900;color:#f43f5e;line-height:1">48</div>
+          <div style="font-size:9px;color:#71717a">/ 100</div>
+          <div style="font-size:9px;background:#f43f5e;color:white;padding:2px 8px;border-radius:3px;font-weight:bold;margin-top:3px">BLOCKED</div>
+        </div>
+      </div>
+
+      <!-- 雷达图 + 卡片环绕区 -->
+      <div style="display:flex;align-items:center;gap:20px;position:relative">
+        
+        <!-- 左侧卡片列(3张敏感维度) -->
+        <div style="display:flex;flex-direction:column;gap:8px;width:180px;flex-shrink:0">
+          <div style="background:#18181b;border-left:3px solid #f43f5e;border-radius:0 6px 6px 0;padding:8px">
+            <div style="display:flex;justify-content:space-between;align-items:center">
+              <div style="display:flex;align-items:center;gap:4px"><span style="font-size:14px">🛡️</span><span style="color:white;font-weight:bold;font-size:9px">安全风险</span></div>
+              <span style="background:#f43f5e;color:white;font-size:7px;padding:1px 5px;border-radius:2px;font-weight:bold">CRITICAL</span>
+            </div>
+            <div style="color:#fca5a5;font-size:7px;margin-top:3px">SQL注入 · 凭证硬编码 · 2项高危</div>
+          </div>
+          <div style="background:#18181b;border-left:3px solid #f59e0b;border-radius:0 6px 6px 0;padding:8px">
+            <div style="display:flex;justify-content:space-between;align-items:center">
+              <div style="display:flex;align-items:center;gap:4px"><span style="font-size:14px">✓</span><span style="color:white;font-weight:bold;font-size:9px">功能正确性</span></div>
+              <span style="background:#f59e0b;color:#0a0a0b;font-size:7px;padding:1px 5px;border-radius:2px;font-weight:bold">WARNING</span>
+            </div>
+            <div style="color:#fcd34d;font-size:7px;margin-top:3px">空catch · 类型不安全 · 潜在缺陷</div>
+          </div>
+          <div style="background:#18181b;border-left:3px solid #10b981;border-radius:0 6px 6px 0;padding:8px">
+            <div style="display:flex;justify-content:space-between;align-items:center">
+              <div style="display:flex;align-items:center;gap:4px"><span style="font-size:14px">📦</span><span style="color:white;font-weight:bold;font-size:9px">依赖安全</span></div>
+              <span style="background:#10b981;color:#0a0a0b;font-size:7px;padding:1px 5px;border-radius:2px;font-weight:bold">PASS</span>
+            </div>
+            <div style="color:#6ee7b7;font-size:7px;margin-top:3px">版本正常 · 无已知 CVE</div>
+          </div>
+        </div>
+
+        <!-- 中央雷达图区域 -->
+        <div style="flex:1;display:flex;justify-content:center;align-items:center;position:relative;min-height:260px">
+          <svg width="260" height="260" viewBox="0 0 260 260">
+            <!-- 背景网格 -->
+            <polygon points="130,35 210,80 210,180 130,225 50,180 50,80" fill="none" stroke="#27272a" stroke-width="1"/>
+            <polygon points="130,60 190,98 190,162 130,200 70,162 70,98" fill="none" stroke="#27272a" stroke-width="0.5"/>
+            <polygon points="130,90 168,115 168,145 130,170 92,145 92,115" fill="none" stroke="#27272a" stroke-width="0.5"/>
+
+            <!-- 坐标轴 -->
+            <line x1="130" y1="130" x2="130" y2="35" stroke="#3f3f46" stroke-width="0.5"/>
+            <line x1="130" y1="130" x2="210" y2="80" stroke="#3f3f46" stroke-width="0.5"/>
+            <line x1="130" y1="130" x2="210" y2="180" stroke="#3f3f46" stroke-width="0.5"/>
+            <line x1="130" y1="130" x2="130" y2="225" stroke="#3f3f46" stroke-width="0.5"/>
+            <line x1="130" y1="130" x2="50" y2="180" stroke="#3f3f46" stroke-width="0.5"/>
+            <line x1="130" y1="130" x2="50" y2="80" stroke="#3f3f46" stroke-width="0.5"/>
+
+            <!-- 数据多边形 (实际评分) -->
+            <polygon points="130,115 154,108 162,130 154,162 130,170 106,162 98,130 106,98" fill="rgba(244,63,94,0.15)" stroke="#f43f5e" stroke-width="1.5" stroke-dasharray="3,2"/>
+            
+            <!-- 敏感维度圆点标记 -->
+            <circle cx="130" cy="115" r="4" fill="#f43f5e"/><circle cx="130" cy="115" r="7" fill="none" stroke="#f43f5e" stroke-width="1" opacity="0.5"/>
+            <circle cx="154" cy="108" r="4" fill="#f59e0b"/><circle cx="154" cy="108" r="7" fill="none" stroke="#f59e0b" stroke-width="1" opacity="0.5"/>
+
+            <!-- 工程维度圆点标记 -->
+            <circle cx="162" cy="130" r="3" fill="#f59e0b"/>
+            <circle cx="154" cy="162" r="3" fill="#10b981"/>
+            <circle cx="130" cy="170" r="3" fill="#f43f5e"/>
+            <circle cx="106" cy="162" r="3" fill="#f43f5e"/>
+            <circle cx="98" cy="130" r="3" fill="#f59e0b"/>
+            <circle cx="106" cy="98" r="3" fill="#10b981"/>
+          </svg>
+          
+          <!-- 中央标签 -->
+          <div style="position:absolute;text-align:center;pointer-events:none">
+            <div style="font-size:28px;font-weight:900;color:#f43f5e">48</div>
+            <div style="font-size:9px;color:#71717a">综合评分</div>
+          </div>
+        </div>
+
+        <!-- 右侧卡片列(5张工程维度) -->
+        <div style="display:flex;flex-direction:column;gap:6px;width:180px;flex-shrink:0">
+          <div style="background:#18181b;border:1px solid #27272a;border-radius:6px;padding:6px;display:flex;align-items:center;gap:8px">
+            <span style="font-size:14px">📝</span>
+            <div style="flex:1"><div style="color:white;font-size:8px;font-weight:bold">可维护性</div></div>
+            <span style="color:#f59e0b;font-weight:900;font-size:16px">68</span>
+          </div>
+          <div style="background:#18181b;border:1px solid #27272a;border-radius:6px;padding:6px;display:flex;align-items:center;gap:8px">
+            <span style="font-size:14px">🏗️</span>
+            <div style="flex:1"><div style="color:white;font-size:8px;font-weight:bold">架构设计</div></div>
+            <span style="color:#10b981;font-weight:900;font-size:16px">80</span>
+          </div>
+          <div style="background:#18181b;border:1px solid #27272a;border-radius:6px;padding:6px;display:flex;align-items:center;gap:8px">
+            <span style="font-size:14px">⚡</span>
+            <div style="flex:1"><div style="color:white;font-size:8px;font-weight:bold">性能</div></div>
+            <span style="color:#f59e0b;font-weight:900;font-size:16px">70</span>
+          </div>
+          <div style="background:#18181b;border:1px solid #27272a;border-radius:6px;padding:6px;display:flex;align-items:center;gap:8px">
+            <span style="font-size:14px">🛟</span>
+            <div style="flex:1"><div style="color:white;font-size:8px;font-weight:bold">容错健壮</div></div>
+            <span style="color:#f43f5e;font-weight:900;font-size:16px">45</span>
+          </div>
+          <div style="background:#18181b;border:1px solid #27272a;border-radius:6px;padding:6px;display:flex;align-items:center;gap:8px">
+            <span style="font-size:14px">🧪</span>
+            <div style="flex:1"><div style="color:white;font-size:8px;font-weight:bold">测试质量</div></div>
+            <span style="color:#f43f5e;font-weight:900;font-size:16px">30</span>
+          </div>
+        </div>
+      </div>
+
+      <!-- 底部变更影响条 -->
+      <div style="background:#18181b;border:1px solid #27272a;border-radius:6px;padding:7px 10px;margin-top:14px;display:flex;align-items:center;gap:10px">
+        <span style="color:#71717a;font-size:8px;font-weight:bold">📌 变更影响</span>
+        <span style="background:#f59e0b22;color:#f59e0b;padding:1px 6px;border-radius:2px;font-size:7px;font-weight:bold">中影响</span>
+        <span style="color:#a1a1aa;font-size:7px">认证模块 · API层 · 数据库 · JWT令牌签发 · 用户会话管理</span>
+      </div>
+    </div>
+  </div>
+</div>
+
+<div class="section">
+  <h3>渐进加载动画流程（SSE 流式推送）</h3>
+  <p class="subtitle">后端每完成一个维度 → SSE推送 → 前端对应卡片从灰色变为点亮状态，雷达图逐步补全</p>
+  
+  <div class="mockup">
+    <div class="mockup-header">阶段 1 → 阶段 2 → 阶段 3 → 完成（加载中的卡片渐变 + 雷达图点渐出）</div>
+    <div class="mockup-body" style="background:#0a0a0b;padding:14px;font-family:monospace">
+      
+      <div style="display:flex;gap:8px;align-items:flex-start">
+        <!-- 阶段1: 语义分析完成 -->
+        <div style="flex:1;background:#18181b;border:1px solid #10b98144;border-radius:8px;padding:8px">
+          <div style="font-size:7px;color:#10b981;text-transform:uppercase;font-weight:bold;margin-bottom:4px">Phase 1 ✅</div>
+          <div style="font-size:8px;color:white;font-weight:bold">业务语义</div>
+          <div style="font-size:7px;color:#a1a1aa;margin-top:2px">修复登录模块SQL注入漏洞</div>
+          <div style="font-size:7px;color:#71717a;margin-top:4px">风险预判: HIGH</div>
+        </div>
+
+        <!-- 阶段2: 并行审计中 -->
+        <div style="flex:1.5;background:#18181b;border:1px solid #27272a;border-radius:8px;padding:8px;position:relative;overflow:hidden">
+          <div style="position:absolute;top:0;left:0;right:0;height:1px;background:linear-gradient(to right,transparent,#f59e0b,transparent);animation:shimmer 2s infinite"></div>
+          <div style="font-size:7px;color:#f59e0b;text-transform:uppercase;font-weight:bold;margin-bottom:4px">Phase 2 · 审计中</div>
+          <div style="display:flex;flex-wrap:wrap;gap:3px">
+            <span style="background:#f43f5e22;color:#f43f5e;font-size:7px;padding:2px 5px;border-radius:2px">安全 ✅</span>
+            <span style="background:#f59e0b22;color:#f59e0b;font-size:7px;padding:2px 5px;border-radius:2px;animation:pulse 1.5s infinite">功能正确性</span>
+            <span style="background:#71717a22;color:#71717a;font-size:7px;padding:2px 5px;border-radius:2px">依赖安全</span>
+            <span style="background:#71717a22;color:#71717a;font-size:7px;padding:2px 5px;border-radius:2px">可维护性</span>
+            <span style="background:#71717a22;color:#71717a;font-size:7px;padding:2px 5px;border-radius:2px">架构</span>
+            <span style="background:#71717a22;color:#71717a;font-size:7px;padding:2px 5px;border-radius:2px">性能</span>
+            <span style="background:#71717a22;color:#71717a;font-size:7px;padding:2px 5px;border-radius:2px">容错</span>
+            <span style="background:#71717a22;color:#71717a;font-size:7px;padding:2px 5px;border-radius:2px">测试</span>
+          </div>
+        </div>
+
+        <!-- 阶段3: 全部完成 -->
+        <div style="flex:1.5;background:#18181b;border:1px solid #10b98144;border-radius:8px;padding:8px">
+          <div style="font-size:7px;color:#10b981;text-transform:uppercase;font-weight:bold;margin-bottom:4px">Phase 2 ✅ 完成</div>
+          <div style="display:flex;flex-wrap:wrap;gap:3px">
+            <span style="background:#f43f5e22;color:#f43f5e;font-size:7px;padding:2px 5px;border-radius:2px">安全 35</span>
+            <span style="background:#f59e0b22;color:#f59e0b;font-size:7px;padding:2px 5px;border-radius:2px">正确性 62</span>
+            <span style="background:#10b98122;color:#10b981;font-size:7px;padding:2px 5px;border-radius:2px">依赖 85</span>
+            <span style="background:#f59e0b22;color:#f59e0b;font-size:7px;padding:2px 5px;border-radius:2px">可维护 68</span>
+            <span style="background:#10b98122;color:#10b981;font-size:7px;padding:2px 5px;border-radius:2px">架构 80</span>
+            <span style="background:#f59e0b22;color:#f59e0b;font-size:7px;padding:2px 5px;border-radius:2px">性能 70</span>
+            <span style="background:#f43f5e22;color:#f43f5e;font-size:7px;padding:2px 5px;border-radius:2px">容错 45</span>
+            <span style="background:#f43f5e22;color:#f43f5e;font-size:7px;padding:2px 5px;border-radius:2px">测试 30</span>
+          </div>
+        </div>
+      </div>
+    </div>
+  </div>
+</div>
+
+<div class="section">
+  <h3>交互行为设计</h3>
+  <div style="display:grid;grid-template-columns:1fr 1fr;gap:8px;margin-top:8px">
+    <div style="background:#18181b;border:1px solid #27272a;border-radius:8px;padding:10px">
+      <div style="font-size:10px;color:white;font-weight:bold;margin-bottom:6px">🖱️ Hover 卡片 → 雷达图高亮</div>
+      <div style="font-size:8px;color:#a1a1aa;line-height:1.5">
+        鼠标悬浮任一张维度卡片时，雷达图中对应轴线和数据点高亮变粗，其他维度半透明。同时卡片浮现简要说明（如安全风险的漏洞类型）。
+      </div>
+    </div>
+    <div style="background:#18181b;border:1px solid #27272a;border-radius:8px;padding:10px">
+      <div style="font-size:10px;color:white;font-weight:bold;margin-bottom:6px">👆 点击卡片 → 展开详情</div>
+      <div style="font-size:8px;color:#a1a1aa;line-height:1.5">
+        点击敏感维度卡片，在雷达图下方区域展开具体漏洞/缺陷列表（如安全风险的漏洞卡片、功能正确性的问题行）。点击工程维度卡片，展开该维度的亮点和改进建议列表。
+      </div>
+    </div>
+    <div style="background:#18181b;border:1px solid #27272a;border-radius:8px;padding:10px">
+      <div style="font-size:10px;color:white;font-weight:bold;margin-bottom:6px">⏳ 加载态 → 骨架 + 脉冲</div>
+      <div style="font-size:8px;color:#a1a1aa;line-height:1.5">
+        SSE 未到达的维度卡片显示灰色骨架框 + 脉冲动画（shimmer wave）。雷达图区域显示白色脉动圆圈。加载完成的维度卡片瞬间从灰色变为对应颜色（红色/橙色/绿色）。
+      </div>
+    </div>
+    <div style="background:#18181b;border:1px solid #27272a;border-radius:8px;padding:10px">
+      <div style="font-size:10px;color:white;font-weight:bold;margin-bottom:6px">🔍 本地推断标记</div>
+      <div style="font-size:8px;color:#a1a1aa;line-height:1.5">
+        LLM 调用失败的维度使用本地兜底推断。该卡片右上角显示小图标 (🔍)，hover 提示"本地启发式分析"。雷达图中该数据点用虚线代替实线。
+      </div>
+    </div>
+  </div>
+</div>
+
+<style>
+@keyframes shimmer {
+  0% { transform: translateX(-100%); }
+  100% { transform: translateX(400%); }
+}
+@keyframes pulse {
+  0%, 100% { opacity: 1; }
+  50% { opacity: 0.4; }
+}
+</style>

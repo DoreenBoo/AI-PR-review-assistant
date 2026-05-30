@@ -1,0 +1,224 @@
+<h2>评估面板布局方案 — 从 4 维到 9 维</h2>
+<p class="subtitle">当前侧边栏只有 4 个维度条。升级到 9 维度后，如何排布更直观？</p>
+
+<div class="section">
+  <h3>当前布局 (4维)</h3>
+  <div class="mockup">
+    <div class="mockup-header">现状：左侧栏 4 条进度条 + 综合评分卡片</div>
+    <div class="mockup-body" style="background:#0a0a0b;padding:16px;font-family:monospace">
+      <div style="display:flex;gap:16px">
+        <div style="width:30%;background:#18181b;border:1px solid #27272a;border-radius:10px;padding:12px;display:flex;flex-direction:column;gap:10px">
+          <div style="font-size:9px;color:#71717a;text-transform:uppercase;font-weight:bold">综合评分</div>
+          <div style="font-size:40px;font-weight:900;color:#f43f5e">48</div>
+          <div style="font-size:8px;color:#71717a">/ 100</div>
+          <div style="height:3px;background:#27272a;border-radius:2px"><div style="width:48%;height:100%;background:#f43f5e;border-radius:2px"></div></div>
+          <div style="font-size:8px;color:#f43f5e;font-weight:bold;margin-top:4px">拦截 · 高危威胁</div>
+        </div>
+        <div style="width:70%">
+          <div style="font-size:9px;color:#71717a;font-weight:bold;text-transform:uppercase;margin-bottom:8px">质量维度</div>
+          <div style="display:flex;flex-direction:column;gap:10px">
+            <div><div style="display:flex;justify-content:space-between;font-size:8px"><span style="color:#a1a1aa">安全性 Security</span><span style="color:#f43f5e">35%</span></div><div style="height:3px;background:#27272a;border-radius:2px;margin-top:2px"><div style="width:35%;height:100%;background:#f43f5e;border-radius:2px"></div></div></div>
+            <div><div style="display:flex;justify-content:space-between;font-size:8px"><span style="color:#a1a1aa">可读性 Readability</span><span style="color:#f59e0b">65%</span></div><div style="height:3px;background:#27272a;border-radius:2px;margin-top:2px"><div style="width:65%;height:100%;background:#f59e0b;border-radius:2px"></div></div></div>
+            <div><div style="display:flex;justify-content:space-between;font-size:8px"><span style="color:#a1a1aa">性能 Performance</span><span style="color:#f59e0b">70%</span></div><div style="height:3px;background:#27272a;border-radius:2px;margin-top:2px"><div style="width:70%;height:100%;background:#f59e0b;border-radius:2px"></div></div></div>
+            <div><div style="display:flex;justify-content:space-between;font-size:8px"><span style="color:#a1a1aa">容错性 Robustness</span><span style="color:#f43f5e">45%</span></div><div style="height:3px;background:#27272a;border-radius:2px;margin-top:2px"><div style="width:45%;height:100%;background:#f43f5e;border-radius:2px"></div></div></div>
+          </div>
+        </div>
+      </div>
+    </div>
+  </div>
+</div>
+
+<div class="options">
+  <div class="option" data-choice="a" onclick="toggleSelect(this)">
+    <div class="letter">A</div>
+    <div class="content">
+      <h3>双层卡片网格 (2×4)</h3>
+      <p>上方：敏感维度 3 张卡片（红/橙/绿状态标签）。下方：工程维度 5 张卡片（分数+进度条）。底部：变更影响元数据行。整体呈纵向分层，扫描路径从上到下。</p>
+    </div>
+  </div>
+  <div class="option" data-choice="b" onclick="toggleSelect(this)">
+    <div class="letter">B</div>
+    <div class="content">
+      <h3>雷达图 + 卡片混合</h3>
+      <p>中央一个雷达图展示 9 维全貌。周围环绕 9 张小卡片各显示维度的判定/分数。视觉冲击力强，适合快速整体判断，但对卡片细节的呈现空间有限。</p>
+    </div>
+  </div>
+  <div class="option" data-choice="c" onclick="toggleSelect(this)">
+    <div class="letter">C</div>
+    <div class="content">
+      <h3>双列面板 + 时间轴</h3>
+      <p>左列：敏感维度（安全/正确性/依赖）竖直排列，每个带醒目的等级徽章。右列：工程维度（5项）卡片网格。顶部保留综合评分 + 通过/拦截结论。整体呈现"审计报告"感。</p>
+    </div>
+  </div>
+</div>
+
+<div class="section">
+  <h3>方案 A - 双层卡片网格</h3>
+  <div class="mockup">
+    <div class="mockup-header">A: 上方危险信号 → 下方工程评分 → 底部变更影响</div>
+    <div class="mockup-body" style="background:#0a0a0b;padding:14px;font-family:monospace;font-size:9px">
+      <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:10px">
+        <div style="font-size:10px;color:#10b981;font-weight:bold;text-transform:uppercase;letter-spacing:1px">审计结论</div>
+        <div style="display:flex;align-items:center;gap:6px">
+          <span style="font-size:28px;font-weight:900;color:#f43f5e">48</span>
+          <span style="font-size:9px;background:#f43f5e;color:white;padding:2px 6px;border-radius:3px;font-weight:bold">BLOCK</span>
+        </div>
+      </div>
+      
+      <div style="font-size:8px;color:#71717a;font-weight:bold;text-transform:uppercase;margin-bottom:6px;letter-spacing:1px">🔴 敏感维度</div>
+      <div style="display:grid;grid-template-columns:1fr 1fr 1fr;gap:6px;margin-bottom:10px">
+        <div style="background:#18181b;border:1px solid #f43f5e33;border-radius:6px;padding:8px">
+          <div style="display:flex;align-items:center;gap:3px;margin-bottom:3px">
+            <span style="font-size:10px">🛡️</span>
+            <span style="color:white;font-weight:bold;font-size:9px">安全风险</span>
+            <span style="background:#f43f5e;color:white;padding:1px 5px;border-radius:2px;font-size:7px;margin-left:auto">HIGH</span>
+          </div>
+          <div style="color:#f43f5e;font-weight:bold;font-size:16px">35 <span style="font-size:9px;color:#881337">/100</span></div>
+          <div style="color:#fca5a5;font-size:7px;margin-top:3px">SQL注入 · 凭证硬编码</div>
+        </div>
+        <div style="background:#18181b;border:1px solid #f59e0b33;border-radius:6px;padding:8px">
+          <div style="display:flex;align-items:center;gap:3px;margin-bottom:3px">
+            <span style="font-size:10px">✓</span>
+            <span style="color:white;font-weight:bold;font-size:9px">功能正确性</span>
+            <span style="background:#f59e0b;color:#0a0a0b;padding:1px 5px;border-radius:2px;font-size:7px;margin-left:auto">WARN</span>
+          </div>
+          <div style="color:#f59e0b;font-weight:bold;font-size:16px">62 <span style="font-size:9px;color:#78350f">/100</span></div>
+          <div style="color:#fcd34d;font-size:7px;margin-top:3px">空catch · 返回值遗漏</div>
+        </div>
+        <div style="background:#18181b;border:1px solid #10b98133;border-radius:6px;padding:8px">
+          <div style="display:flex;align-items:center;gap:3px;margin-bottom:3px">
+            <span style="font-size:10px">📦</span>
+            <span style="color:white;font-weight:bold;font-size:9px">依赖安全</span>
+            <span style="background:#10b981;color:#0a0a0b;padding:1px 5px;border-radius:2px;font-size:7px;margin-left:auto">PASS</span>
+          </div>
+          <div style="color:#10b981;font-weight:bold;font-size:16px">85 <span style="font-size:9px;color:#064e3b">/100</span></div>
+          <div style="color:#6ee7b7;font-size:7px;margin-top:3px">依赖版本正常</div>
+        </div>
+      </div>
+
+      <div style="font-size:8px;color:#71717a;font-weight:bold;text-transform:uppercase;margin-bottom:6px;letter-spacing:1px">🟢 工程维度</div>
+      <div style="display:grid;grid-template-columns:1fr 1fr 1fr 1fr 1fr;gap:6px;margin-bottom:10px">
+        <div style="background:#18181b;border:1px solid #27272a;border-radius:6px;padding:6px;text-align:center">
+          <div style="color:#a1a1aa;font-size:7px;margin-bottom:3px">📝 可维护性</div>
+          <div style="color:#f59e0b;font-weight:bold;font-size:18px">68</div>
+        </div>
+        <div style="background:#18181b;border:1px solid #27272a;border-radius:6px;padding:6px;text-align:center">
+          <div style="color:#a1a1aa;font-size:7px;margin-bottom:3px">🏗️ 架构设计</div>
+          <div style="color:#10b981;font-weight:bold;font-size:18px">80</div>
+        </div>
+        <div style="background:#18181b;border:1px solid #27272a;border-radius:6px;padding:6px;text-align:center">
+          <div style="color:#a1a1aa;font-size:7px;margin-bottom:3px">⚡ 性能</div>
+          <div style="color:#f59e0b;font-weight:bold;font-size:18px">70</div>
+        </div>
+        <div style="background:#18181b;border:1px solid #27272a;border-radius:6px;padding:6px;text-align:center">
+          <div style="color:#a1a1aa;font-size:7px;margin-bottom:3px">🛟 容错健壮</div>
+          <div style="color:#f43f5e;font-weight:bold;font-size:18px">45</div>
+        </div>
+        <div style="background:#18181b;border:1px solid #27272a;border-radius:6px;padding:6px;text-align:center">
+          <div style="color:#a1a1aa;font-size:7px;margin-bottom:3px">🧪 测试质量</div>
+          <div style="color:#f43f5e;font-weight:bold;font-size:18px">30</div>
+        </div>
+      </div>
+
+      <div style="background:#18181b;border:1px solid #27272a;border-radius:6px;padding:6px;display:flex;align-items:center;gap:10px">
+        <span style="color:#71717a;font-size:7px;font-weight:bold">📌 变更影响:</span>
+        <span style="background:#f59e0b22;color:#f59e0b;padding:1px 5px;border-radius:2px;font-size:7px;font-weight:bold">中影响</span>
+        <span style="color:#a1a1aa;font-size:7px">公共API · 数据库模型 · 认证模块</span>
+      </div>
+    </div>
+  </div>
+</div>
+
+<div class="section">
+  <h3>方案 C - 双列面板 + 审计报告风格</h3>
+  <div class="mockup">
+    <div class="mockup-header">C: 左列敏感维度(竖直) + 右列工程维度(卡片网格)，顶部结论栏</div>
+    <div class="mockup-body" style="background:#0a0a0b;padding:14px;font-family:monospace;font-size:9px">
+      <div style="background:linear-gradient(135deg,#18181b,#0a0a0b);border:1px solid #27272a;border-radius:8px;padding:8px;margin-bottom:10px;display:flex;align-items:center">
+        <div style="width:3px;height:32px;background:linear-gradient(to bottom,#f43f5e,#f59e0b,#10b981);border-radius:2px;margin-right:8px"></div>
+        <div style="flex:1">
+          <div style="color:white;font-size:10px;font-weight:bold">阻断 · 发现 3 项高危问题</div>
+        </div>
+        <div style="font-size:32px;font-weight:900;color:#f43f5e">48<span style="font-size:12px;color:#71717a">/100</span></div>
+        <span style="font-size:9px;background:#f43f5e;color:white;padding:2px 8px;border-radius:3px;font-weight:bold;margin-left:6px">BLOCKED</span>
+      </div>
+      
+      <div style="display:grid;grid-template-columns:1fr 1.5fr;gap:8px">
+        <div style="display:flex;flex-direction:column;gap:6px">
+          <div style="font-size:8px;color:#71717a;font-weight:bold;text-transform:uppercase;letter-spacing:1px">🔴 高风险信号</div>
+          
+          <div style="background:#18181b;border-left:2px solid #f43f5e;border-radius:0 4px 4px 0;padding:6px 8px">
+            <div style="display:flex;justify-content:space-between;align-items:center">
+              <span style="color:white;font-weight:bold;font-size:8px">🛡️ 安全风险</span>
+              <span style="background:#f43f5e;color:white;font-size:7px;padding:1px 5px;border-radius:2px">CRITICAL</span>
+            </div>
+            <div style="color:#fca5a5;font-size:7px;margin-top:2px">2项高危漏洞 · 35分</div>
+            <div style="height:2px;background:#27272a;border-radius:1px;margin-top:3px"><div style="width:35%;height:100%;background:#f43f5e;border-radius:1px"></div></div>
+          </div>
+          
+          <div style="background:#18181b;border-left:2px solid #f59e0b;border-radius:0 4px 4px 0;padding:6px 8px">
+            <div style="display:flex;justify-content:space-between;align-items:center">
+              <span style="color:white;font-weight:bold;font-size:8px">✓ 功能正确性</span>
+              <span style="background:#f59e0b;color:#0a0a0b;font-size:7px;padding:1px 5px;border-radius:2px">WARNING</span>
+            </div>
+            <div style="color:#fcd34d;font-size:7px;margin-top:2px">潜在缺陷 · 62分</div>
+            <div style="height:2px;background:#27272a;border-radius:1px;margin-top:3px"><div style="width:62%;height:100%;background:#f59e0b;border-radius:1px"></div></div>
+          </div>
+          
+          <div style="background:#18181b;border-left:2px solid #10b981;border-radius:0 4px 4px 0;padding:6px 8px">
+            <div style="display:flex;justify-content:space-between;align-items:center">
+              <span style="color:white;font-weight:bold;font-size:8px">📦 依赖安全</span>
+              <span style="background:#10b981;color:#0a0a0b;font-size:7px;padding:1px 5px;border-radius:2px">PASS</span>
+            </div>
+            <div style="color:#6ee7b7;font-size:7px;margin-top:2px">版本正常 · 85分</div>
+            <div style="height:2px;background:#27272a;border-radius:1px;margin-top:3px"><div style="width:85%;height:100%;background:#10b981;border-radius:1px"></div></div>
+          </div>
+
+          <div style="font-size:8px;color:#71717a;font-weight:bold;text-transform:uppercase;letter-spacing:1px;margin-top:3px">📌 变更影响</div>
+          <div style="background:#18181b;border-radius:4px;padding:6px 8px">
+            <div style="display:flex;gap:6px;align-items:center">
+              <span style="background:#f59e0b22;color:#f59e0b;font-size:7px;padding:1px 4px;border-radius:2px;font-weight:bold">中影响</span>
+              <span style="color:#a1a1aa;font-size:7px">认证模块 · API层 · 数据库</span>
+            </div>
+          </div>
+        </div>
+
+        <div>
+          <div style="font-size:8px;color:#71717a;font-weight:bold;text-transform:uppercase;letter-spacing:1px;margin-bottom:6px">🟢 工程质量评分</div>
+          <div style="display:grid;grid-template-columns:1fr 1fr;gap:5px">
+            <div style="background:#18181b;border:1px solid #27272a;border-radius:6px;padding:8px;text-align:center">
+              <div style="font-size:14px;margin-bottom:2px">📝</div>
+              <div style="color:white;font-size:7px;font-weight:bold">可维护性</div>
+              <div style="color:#f59e0b;font-weight:900;font-size:20px;margin-top:2px">68</div>
+              <div style="height:2px;background:#27272a;border-radius:1px;margin-top:3px"><div style="width:68%;height:100%;background:#f59e0b;border-radius:1px"></div></div>
+            </div>
+            <div style="background:#18181b;border:1px solid #27272a;border-radius:6px;padding:8px;text-align:center">
+              <div style="font-size:14px;margin-bottom:2px">🏗️</div>
+              <div style="color:white;font-size:7px;font-weight:bold">架构设计</div>
+              <div style="color:#10b981;font-weight:900;font-size:20px;margin-top:2px">80</div>
+              <div style="height:2px;background:#27272a;border-radius:1px;margin-top:3px"><div style="width:80%;height:100%;background:#10b981;border-radius:1px"></div></div>
+            </div>
+            <div style="background:#18181b;border:1px solid #27272a;border-radius:6px;padding:8px;text-align:center">
+              <div style="font-size:14px;margin-bottom:2px">⚡</div>
+              <div style="color:white;font-size:7px;font-weight:bold">性能</div>
+              <div style="color:#f59e0b;font-weight:900;font-size:20px;margin-top:2px">70</div>
+              <div style="height:2px;background:#27272a;border-radius:1px;margin-top:3px"><div style="width:70%;height:100%;background:#f59e0b;border-radius:1px"></div></div>
+            </div>
+            <div style="background:#18181b;border:1px solid #27272a;border-radius:6px;padding:8px;text-align:center">
+              <div style="font-size:14px;margin-bottom:2px">🛟</div>
+              <div style="color:white;font-size:7px;font-weight:bold">容错健壮</div>
+              <div style="color:#f43f5e;font-weight:900;font-size:20px;margin-top:2px">45</div>
+              <div style="height:2px;background:#27272a;border-radius:1px;margin-top:3px"><div style="width:45%;height:100%;background:#f43f5e;border-radius:1px"></div></div>
+            </div>
+            <div style="background:#18181b;border:1px solid #27272a;border-radius:6px;padding:8px;text-align:center;grid-column:1/-1">
+              <div style="font-size:14px;margin-bottom:2px">🧪</div>
+              <div style="color:white;font-size:7px;font-weight:bold">测试质量</div>
+              <div style="color:#f43f5e;font-weight:900;font-size:20px;margin-top:2px">30</div>
+              <div style="height:2px;background:#27272a;border-radius:1px;margin-top:3px"><div style="width:30%;height:100%;background:#f43f5e;border-radius:1px"></div></div>
+            </div>
+          </div>
+        </div>
+      </div>
+    </div>
+  </div>
+</div>
