@@ -28,6 +28,9 @@ import {
   FileText
 } from "lucide-react";
 import { PrReviewResult, ReviewComment, AiModel } from "./types";
+import RadarChart from "./components/RadarChart";
+import { SecurityCard, CorrectnessCard, DependencyCard, EngineeringScoreCard, ImpactBar, SkeletonCard, LevelBadge } from "./components/DimensionCards";
+import { useSSEReview } from "./hooks/useSSEReview";
 
 // ==========================================
 // PRESET MOCK DATA FOR DEMO PURPOSES
@@ -160,6 +163,9 @@ export default function App() {
   const [expandedHeaders, setExpandedHeaders] = useState<Record<string, boolean>>({});
   const [showFileDropdown, setShowFileDropdown] = useState(false);
   const fileTabsRef = useRef<HTMLDivElement>(null);
+  const [highlightedDimension, setHighlightedDimension] = useState<string | null>(null);
+  const [expandedDimension, setExpandedDimension] = useState<string | null>(null);
+  const { startReview: startSSEReview, cancelReview, ...reviewState } = useSSEReview();
 
   // Parse the Unified Patch / Diff
   const parsedFiles = useMemo(() => {
@@ -298,6 +304,16 @@ export default function App() {
     }
   };
 
+  const handleSSEReview = (e: React.FormEvent) => {
+    e.preventDefault();
+    if (!prUrl && !pastedDiff) {
+      setErrorMessage("请输入合法的 GitHub PR URL 或粘贴 Unified Diff 文本内容");
+      return;
+    }
+    setErrorMessage("");
+    startSSEReview(prUrl, pastedDiff, selectedModel);
+  };
+
   const loadDemoDiff = () => {
     setPrUrl("https://github.com/developer/sec-demo-app/pull/15");
     setPastedDiff(MOCK_REVIEW_RESULT.diff);
@@ -384,7 +400,7 @@ export default function App() {
             <span className="text-[9px] bg-zinc-800/80 px-2 py-0.5 rounded text-zinc-500 font-bold border border-zinc-800">01 / SOURCE_CONFIG</span>
           </div>
 
-          <form onSubmit={handleStartReview} className="space-y-4">
+          <form onSubmit={handleSSEReview} className="space-y-4">
             <div>
               <div className="flex items-center gap-2 mb-2">
                 <Sliders className="w-4 h-4 text-emerald-400 shrink-0" />
@@ -499,14 +515,14 @@ export default function App() {
                 </div>
                 <button
                   type="submit"
-                  disabled={loading}
+                  disabled={loading || reviewState.loading}
                   className="bg-emerald-500 hover:bg-emerald-400 text-zinc-950 px-5 py-2 rounded font-bold text-xs flex items-center justify-center gap-2 transition duration-200 shadow-[0_0_15px_rgba(16,185,129,0.2)] disabled:opacity-50 disabled:pointer-events-none w-full sm:w-auto cursor-pointer"
                 >
-                  {loading ? (
-                    <>
-                      <div className="w-3 h-3 border-2 border-zinc-950 border-t-transparent rounded-full animate-spin" />
-                      <span>正在分析变更...</span>
-                    </>
+                  {loading || reviewState.loading ? (
+                      <>
+                        <div className="w-3 h-3 border-2 border-zinc-950 border-t-transparent rounded-full animate-spin" />
+                        <span>{reviewState.loading ? "SSE 流式分析中..." : "正在分析变更..."}</span>
+                      </>
                   ) : (
                     <>
                       <Play className="w-3.5 h-3.5 fill-zinc-950" />
@@ -521,7 +537,7 @@ export default function App() {
 
         {/* LOADING SCANNERS OVERLAY */}
         <AnimatePresence>
-          {loading && (
+          {(loading || reviewState.loading) && (
             <motion.div 
               initial={{ opacity: 0, y: 5 }}
               animate={{ opacity: 1, y: 0 }}
@@ -548,7 +564,7 @@ export default function App() {
 
         {/* DATA CONTAINER INSIDE SHARP TECH GRID */}
         <AnimatePresence>
-          {!loading && reviewResult && (
+          {((!loading && reviewResult) || reviewState.loading || reviewState.semantics) && (
             <motion.div 
               initial={{ opacity: 0 }}
               animate={{ opacity: 1 }}
@@ -646,9 +662,128 @@ export default function App() {
               {/* TWO COLUMN SIDEBAR & COMPARATOR LAYOUT */}
               <div className="grid grid-cols-1 lg:grid-cols-12 gap-6" id="overview_grids">
                 
-                {/* SIDEBAR: PR CHANGE SUMMARY PANEL */}
-                <aside className="lg:col-span-4 flex flex-col gap-5" id="sidebar_analytics">
-                  
+                {/* SIDEBAR: 9-DIMENSION DASHBOARD (SSE) or LEGACY SIDEBAR */}
+                {reviewState.loading || reviewState.semantics ? (
+                  <aside className="lg:col-span-5 flex flex-col gap-4">
+                    {/* Top conclusion bar */}
+                    <div className="bg-zinc-900/40 border border-zinc-800 rounded-xl p-4 flex items-center gap-4">
+                      <div className="w-1 h-10 bg-gradient-to-b from-rose-500 via-amber-500 to-emerald-500 rounded-full shrink-0" />
+                      <div className="flex-1 min-w-0">
+                        <div className="text-[9px] text-zinc-500 uppercase tracking-wider font-bold">审计结论</div>
+                        <div className="text-xs text-white font-bold mt-0.5 truncate">
+                          {reviewState.summary || (reviewState.loading ? '审计进行中...' : '分析中...')}
+                        </div>
+                      </div>
+                      {reviewState.overallScore !== null && (
+                        <div className="text-center shrink-0">
+                          <div className={`text-3xl font-black ${reviewState.overallScore >= 70 ? 'text-emerald-400' : reviewState.overallScore >= 50 ? 'text-amber-400' : 'text-rose-500'}`}>
+                            {reviewState.overallScore}
+                          </div>
+                          {reviewState.overallLevel && <LevelBadge level={reviewState.overallLevel as "critical" | "warning" | "pass" | "na"} />}
+                        </div>
+                      )}
+                    </div>
+
+                    {/* Three-column: sensitive dimensions | radar | engineering dimensions */}
+                    <div className="flex items-start gap-3">
+                      {/* Left: sensitive dimensions */}
+                      <div className="flex flex-col gap-2 w-[155px] shrink-0">
+                        <SecurityCard
+                          data={reviewState.security}
+                          highlighted={highlightedDimension === 'security'}
+                          onHover={(entering: boolean) => setHighlightedDimension(entering ? 'security' : null)}
+                          onClick={() => setExpandedDimension(expandedDimension === 'security' ? null : 'security')}
+                          expanded={expandedDimension === 'security'}
+                        />
+                        <CorrectnessCard
+                          data={reviewState.correctness}
+                          highlighted={highlightedDimension === 'correctness'}
+                          onHover={(entering: boolean) => setHighlightedDimension(entering ? 'correctness' : null)}
+                          onClick={() => setExpandedDimension(expandedDimension === 'correctness' ? null : 'correctness')}
+                          expanded={expandedDimension === 'correctness'}
+                        />
+                        <DependencyCard
+                          data={reviewState.dependency}
+                          highlighted={highlightedDimension === 'dependency'}
+                          onHover={(entering: boolean) => setHighlightedDimension(entering ? 'dependency' : null)}
+                          onClick={() => setExpandedDimension(expandedDimension === 'dependency' ? null : 'dependency')}
+                          expanded={expandedDimension === 'dependency'}
+                        />
+                        {(reviewState.security?._inferred || reviewState.correctness?._inferred || reviewState.dependency?._inferred) && (
+                          <div className="text-[8px] text-zinc-600 text-center mt-1">🔍 部分维度使用本地启发式分析</div>
+                        )}
+                      </div>
+
+                      {/* Center: radar chart */}
+                      <div className="flex-1 flex justify-center">
+                        <RadarChart
+                          security={reviewState.security}
+                          correctness={reviewState.correctness}
+                          dependency={reviewState.dependency}
+                          maintainability={reviewState.maintainability}
+                          architecture={reviewState.architecture}
+                          performance={reviewState.performance}
+                          robustness={reviewState.robustness}
+                          testQuality={reviewState.testQuality}
+                          overallScore={reviewState.overallScore}
+                          highlightedDimension={highlightedDimension}
+                        />
+                      </div>
+
+                      {/* Right: engineering dimensions */}
+                      <div className="flex flex-col gap-1.5 w-[145px] shrink-0">
+                        <EngineeringScoreCard label="可维护性" icon="📝" data={reviewState.maintainability} dim="maintainability"
+                          highlighted={highlightedDimension === 'maintainability'} onHover={(entering: boolean) => setHighlightedDimension(entering ? 'maintainability' : null)}
+                          onClick={() => setExpandedDimension(expandedDimension === 'maintainability' ? null : 'maintainability')}
+                          expanded={expandedDimension === 'maintainability'} />
+                        <EngineeringScoreCard label="架构设计" icon="🏗️" data={reviewState.architecture} dim="architecture"
+                          highlighted={highlightedDimension === 'architecture'} onHover={(entering: boolean) => setHighlightedDimension(entering ? 'architecture' : null)}
+                          onClick={() => setExpandedDimension(expandedDimension === 'architecture' ? null : 'architecture')}
+                          expanded={expandedDimension === 'architecture'} />
+                        <EngineeringScoreCard label="性能" icon="⚡" data={reviewState.performance} dim="performance"
+                          highlighted={highlightedDimension === 'performance'} onHover={(entering: boolean) => setHighlightedDimension(entering ? 'performance' : null)}
+                          onClick={() => setExpandedDimension(expandedDimension === 'performance' ? null : 'performance')}
+                          expanded={expandedDimension === 'performance'} />
+                        <EngineeringScoreCard label="容错健壮" icon="🛟" data={reviewState.robustness} dim="robustness"
+                          highlighted={highlightedDimension === 'robustness'} onHover={(entering: boolean) => setHighlightedDimension(entering ? 'robustness' : null)}
+                          onClick={() => setExpandedDimension(expandedDimension === 'robustness' ? null : 'robustness')}
+                          expanded={expandedDimension === 'robustness'} />
+                        <EngineeringScoreCard label="测试质量" icon="🧪" data={reviewState.testQuality} dim="testQuality"
+                          highlighted={highlightedDimension === 'testQuality'} onHover={(entering: boolean) => setHighlightedDimension(entering ? 'testQuality' : null)}
+                          onClick={() => setExpandedDimension(expandedDimension === 'testQuality' ? null : 'testQuality')}
+                          expanded={expandedDimension === 'testQuality'} />
+                      </div>
+                    </div>
+
+                    {/* Bottom: impact bar */}
+                    <ImpactBar data={reviewState.impact} />
+
+                    {/* Key findings */}
+                    {reviewState.keyFindings.length > 0 && (
+                      <div className="bg-zinc-900/40 border border-zinc-800 rounded-lg p-4">
+                        <div className="text-[9px] text-zinc-500 uppercase font-bold mb-2">关键发现</div>
+                        <div className="flex flex-col gap-1">
+                          {reviewState.keyFindings.map((f: string, i: number) => (
+                            <div key={i} className="text-[10px] text-zinc-300 flex items-start gap-2">
+                              <span className="text-rose-400 shrink-0 mt-0.5">•</span>
+                              <span>{f}</span>
+                            </div>
+                          ))}
+                        </div>
+                      </div>
+                    )}
+
+                    {/* Loading indicator */}
+                    {reviewState.loading && !reviewState.semantics && (
+                      <div className="flex items-center justify-center py-8 text-zinc-600 text-xs gap-2">
+                        <div className="w-2 h-2 bg-emerald-500 rounded-full animate-pulse" />
+                        <span>正在分析语义...</span>
+                      </div>
+                    )}
+                  </aside>
+                ) : (
+                  <aside className="lg:col-span-4 flex flex-col gap-5" id="sidebar_analytics">
+
                   {/* Key Findings — moved above score */}
                   <div className="bg-zinc-900/30 border border-zinc-800 rounded-xl p-4 flex flex-col gap-3">
                     <div className="flex items-center gap-2">
@@ -719,9 +854,10 @@ export default function App() {
                   </div>
 
                   </aside>
+                )}
 
                 {/* RIGHT CELL: CORE DOUBLE COLUMN DIFF COMPILER WITH INTERACTIVE REVIEW CARDS */}
-                <section className="lg:col-span-8 flex flex-col bg-zinc-900 border border-zinc-800 rounded-xl overflow-hidden" id="diff_explorer">
+                <section className={`${reviewState.loading || reviewState.semantics ? 'lg:col-span-7' : 'lg:col-span-8'} flex flex-col bg-zinc-900 border border-zinc-800 rounded-xl overflow-hidden`} id="diff_explorer">
                   
                   {/* FILE SELECTOR BAR */}
                   <div className="bg-zinc-800/35 px-4 py-2 border-b border-zinc-800 flex items-center gap-3">
