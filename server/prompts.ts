@@ -87,6 +87,8 @@ export function buildPhase2UserPrompt(
 请专注于以下检查项:
 ${checklist}
 
+输出格式: [JSON Schema]
+
 --- GIT DIFF ---
 ${diffText}
 --- GIT DIFF END ---`;
