@@ -4,7 +4,7 @@ import { createServer as createViteServer } from "vite";
 import { GoogleGenAI, Type } from "@google/genai";
 import dotenv from "dotenv";
 import fs from "fs";
-import { ProxyAgent, setGlobalDispatcher } from "undici";
+import { ProxyAgent, setGlobalDispatcher, Agent } from "undici";
 
 dotenv.config();
 if (!process.env.GEMINI_API_KEY) {
@@ -23,6 +23,50 @@ if (proxyUrl) {
   } catch (e) {
     console.warn("Failed to configure HTTPS proxy:", e);
   }
+}
+
+const DEEPSEEK_API_KEY = process.env.DEEPSEEK_API_KEY || process.env.DEEPSEEK_API_Key;
+const DEEPSEEK_API_URL = "https://api.deepseek.com/v1/chat/completions";
+const DEEPSEEK_MODEL = "deepseek-v4-pro";
+
+const directDispatcher = new Agent();
+
+async function callDeepSeekAPI(systemInstruction: string, userPrompt: string): Promise<string> {
+  if (!DEEPSEEK_API_KEY) {
+    throw new Error(
+      "DEEPSEEK_API_KEY environment variable is not defined. Please configure it in Settings > Secrets."
+    );
+  }
+
+  const response = await fetch(DEEPSEEK_API_URL, {
+    method: "POST",
+    headers: {
+      "Content-Type": "application/json",
+      "Authorization": `Bearer ${DEEPSEEK_API_KEY}`,
+    },
+    body: JSON.stringify({
+      model: DEEPSEEK_MODEL,
+      messages: [
+        { role: "system", content: systemInstruction },
+        { role: "user", content: userPrompt },
+      ],
+      temperature: 0.1,
+      response_format: { type: "json_object" },
+    }),
+    dispatcher: directDispatcher,
+    } as RequestInit & { dispatcher: Agent });
+
+  if (!response.ok) {
+    const errorText = await response.text();
+    throw new Error(`DeepSeek API error (${response.status}): ${errorText}`);
+  }
+
+  const data: any = await response.json();
+  const content = data.choices?.[0]?.message?.content;
+  if (!content) {
+    throw new Error("No response content received from DeepSeek API.");
+  }
+  return content;
 }
 
 const app = express();
@@ -660,9 +704,24 @@ app.post("/api/review", async (req, res): Promise<any> => {
     targetDiff = targetDiff.substring(0, 50000) + "\n\n... (diff truncated for token limit) ...";
   }
 
-  try {
-    const client = getGeminiClient();
+  const model: string = req.body.model || 'deepseek';
 
+  const DEEPSEEK_SCHEMA_INSTRUCTION = `
+
+YOU MUST respond with a single valid JSON object containing ALL of these fields:
+- "businessIntent": string (one-sentence Chinese description of the business intent)
+- "impactScope": string[] (affected functional modules, at least 1 element)
+- "riskLevel": "high" | "medium" | "low"
+- "summary": string (one-sentence Chinese audit conclusion)
+- "badge": string (category label like "安全风险修复" | "架构重构" | "功能迭代")
+- "score": { "security": integer 0-100, "readability": integer 0-100, "performance": integer 0-100, "robustness": integer 0-100 }
+- "overallScore": integer 0-100
+- "keyFindings": string[] (2-3 Chinese sentences of critical findings)
+- "comments": [{ "filePath": string, "line": integer, "originalContent": string, "issue": string, "suggestion": string, "severity": "High" | "Medium" | "Low" }]
+
+Do not include any text outside the JSON object.`;
+
+  try {
     const systemInstruction = `You are an elite production-grade Tech Lead performing code review.
 You MUST follow a strict two-phase analysis pipeline. Never skip a phase.
 
@@ -750,8 +809,14 @@ CRITICAL: The Phase 1 output (businessIntent, impactScope, riskLevel) is REQUIRE
 ${targetDiff}
 --- GIT DIFF END ---`;
 
-    const response = await client.models.generateContent({
-      model: "gemini-3.5-flash",
+    let text: string;
+    if (model === 'deepseek') {
+      const deepseekSystemInstruction = systemInstruction + DEEPSEEK_SCHEMA_INSTRUCTION;
+      text = await callDeepSeekAPI(deepseekSystemInstruction, userPrompt);
+    } else {
+      const client = getGeminiClient();
+      const response = await client.models.generateContent({
+        model: "gemini-3.5-flash",
       contents: userPrompt,
       config: {
         systemInstruction,
@@ -823,7 +888,8 @@ ${targetDiff}
       },
     });
 
-    const text = response.text;
+    text = response.text;
+    }
     if (!text) {
       throw new Error("No response text received from Gemini model.");
     }
