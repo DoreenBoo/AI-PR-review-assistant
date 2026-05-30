@@ -62,7 +62,7 @@ export function inferSecurityFromDiff(diffText: string): SecurityAudit {
     { pattern: /token\s*[=:]\s*['"`][^'"`]{8,}['"`]/i, category: 'hardcoded_secret' },
     { pattern: /access[_-]?key\s*[=:]\s*['"`][^'"`]{8,}['"`]/i, category: 'hardcoded_secret' },
     { pattern: /jwt\.sign\s*\(\s*[^,)]*,\s*['"`][^'"`]{4,}['"`]/i, category: 'hardcoded_secret' },
-    { pattern: /innerHTML\s*[=!]=/i, category: 'xss' },
+    { pattern: /\.innerHTML\s*=/i, category: 'xss' },
     { pattern: /dangerouslySetInnerHTML/i, category: 'xss' },
     { pattern: /document\.write\s*\(/i, category: 'xss' },
     { pattern: /eval\s*\(/i, category: 'xss' },
@@ -214,6 +214,18 @@ export function inferCorrectnessFromDiff(diffText: string): CorrectnessAudit {
         }
       }
     }
+  }
+
+  if (currentFile && removedReturnIndices.length > 0) {
+    for (const ri of removedReturnIndices) {
+      concerns.push({
+        type: 'logic_error',
+        description: '删除了return语句，可能导致函数缺少返回值或返回值改变',
+        filePath: ri.file,
+        lineNumber: ri.line,
+      });
+    }
+    removedReturnIndices.length = 0;
   }
 
   if (concerns.length === 0) {
