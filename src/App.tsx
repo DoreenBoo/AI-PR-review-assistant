@@ -154,6 +154,7 @@ export default function App() {
   const [resolvedIssues, setResolvedIssues] = useState<Record<string, boolean>>({});
   const [selectedFile, setSelectedFile] = useState<string>("");
   const [copiedCodeId, setCopiedCodeId] = useState<string | null>(null);
+  const [expandedHeaders, setExpandedHeaders] = useState<Record<string, boolean>>({});
 
   // Parse the Unified Patch / Diff
   const parsedFiles = useMemo(() => {
@@ -538,151 +539,166 @@ export default function App() {
                 </div>
               )}
               
+              {(reviewResult.metadata || reviewResult.semantics) && (
+                <div className="bg-zinc-900/40 border border-zinc-800 rounded-xl p-5 flex flex-col gap-3" id="metadata_panel">
+                  {reviewResult.metadata ? (
+                    <>
+                      <div className="flex items-center justify-between">
+                        <div className="flex items-center gap-2">
+                          <Github className="w-4 h-4 text-emerald-400" />
+                          <span className="text-xs text-zinc-400 font-mono">
+                            PR #{reviewResult.metadata.pullNumber}
+                          </span>
+                          {reviewResult.semantics?.riskLevel && (
+                            <span className={`text-[9px] px-1.5 py-0.5 rounded font-mono font-bold ${
+                              reviewResult.semantics.riskLevel === 'high' ? 'bg-rose-950 text-rose-400' :
+                              reviewResult.semantics.riskLevel === 'medium' ? 'bg-amber-950 text-amber-400' :
+                              'bg-emerald-950 text-emerald-400'
+                            }`}>
+                              {reviewResult.semantics.riskLevel === 'high' ? 'HIGH RISK' :
+                               reviewResult.semantics.riskLevel === 'medium' ? 'MEDIUM' : 'LOW'}
+                            </span>
+                          )}
+                        </div>
+                        <div className="flex items-center gap-3 text-[10px] text-zinc-500 font-mono">
+                          <span>👤 {reviewResult.metadata.author}</span>
+                          <span>📅 {new Date(reviewResult.metadata.createdAt).toLocaleDateString('zh-CN')}</span>
+                        </div>
+                      </div>
+
+                      <h3 className="text-sm font-bold text-white leading-snug">
+                        {reviewResult.metadata.title}
+                      </h3>
+
+                      {reviewResult.metadata.description && (
+                        <p className="text-[11px] text-zinc-400 leading-relaxed font-sans line-clamp-3">
+                          {reviewResult.metadata.description}
+                        </p>
+                      )}
+
+                      <div className="flex flex-wrap items-center gap-2 text-[10px]">
+                        {reviewResult.metadata.linkedIssues.length > 0 && (
+                          <span className="text-zinc-500">
+                            🔗 Issues: {reviewResult.metadata.linkedIssues.map(i => `#${i.number}`).join(' · ')}
+                          </span>
+                        )}
+                        {reviewResult.semantics?.impactScope && reviewResult.semantics.impactScope.length > 0 && (
+                          <span className="text-zinc-500 ml-2">
+                            📌 影响范围: {reviewResult.semantics.impactScope.join(' · ')}
+                          </span>
+                        )}
+                      </div>
+                    </>
+                  ) : (
+                    <>
+                      <div className="flex items-center gap-2">
+                        <span className="text-[10px] text-zinc-500 uppercase tracking-wider font-bold">变更总结</span>
+                        {reviewResult.semantics?.riskLevel && (
+                          <span className={`text-[9px] px-1.5 py-0.5 rounded font-mono font-bold ${
+                            reviewResult.semantics.riskLevel === 'high' ? 'bg-rose-950 text-rose-400' :
+                            reviewResult.semantics.riskLevel === 'medium' ? 'bg-amber-950 text-amber-400' :
+                            'bg-emerald-950 text-emerald-400'
+                          }`}>
+                            {reviewResult.semantics.riskLevel === 'high' ? 'HIGH RISK' :
+                             reviewResult.semantics.riskLevel === 'medium' ? 'MEDIUM' : 'LOW'}
+                          </span>
+                        )}
+                      </div>
+
+                      {reviewResult.semantics?.intent && (
+                        <p className="text-[12px] text-white leading-relaxed font-sans">
+                          {reviewResult.semantics.intent}
+                        </p>
+                      )}
+
+                      {reviewResult.semantics?.impactScope && reviewResult.semantics.impactScope.length > 0 && (
+                        <div className="flex items-start gap-2 text-[10px]">
+                          <span className="text-zinc-500 shrink-0 mt-0.5">📌</span>
+                          <span className="text-zinc-400">
+                            {reviewResult.semantics.impactScope.join(' · ')}
+                          </span>
+                        </div>
+                      )}
+                    </>
+                  )}
+                </div>
+              )}
+              
               {/* TWO COLUMN SIDEBAR & COMPARATOR LAYOUT */}
               <div className="grid grid-cols-1 lg:grid-cols-12 gap-6" id="overview_grids">
                 
-                {/* SIDEBAR: ANALYTICS & SUMMARY */}
-                <aside className="lg:col-span-4 flex flex-col gap-6" id="sidebar_analytics">
+                {/* SIDEBAR: PR CHANGE SUMMARY PANEL */}
+                <aside className="lg:col-span-4 flex flex-col gap-5" id="sidebar_analytics">
                   
-                  {/* Global Score Card (Risk Probability or Overall Score) */}
-                  <div className="bg-zinc-900/50 border border-zinc-800 p-5 rounded-xl flex flex-col items-center justify-center relative overflow-hidden group">
-                    <div className="absolute top-3 right-3 text-zinc-500">
-                      <Sliders className="w-3.5 h-3.5 text-zinc-600" />
-                    </div>
+                  {/* Score Card */}
+                  <div className="bg-zinc-900/40 border border-zinc-800 rounded-xl p-5 flex flex-col items-center">
+                    <span className="text-[10px] text-zinc-500 uppercase tracking-wider font-bold mb-3">综合评分</span>
                     
-                    <span className="text-[10px] text-zinc-500 uppercase tracking-widest mb-1.5 font-bold">OVERALL RATING INDEX</span>
-                    
-                    <div className="flex items-baseline gap-1">
-                      <span className={`text-5xl font-black ${
-                        reviewResult.overallScore >= 75 ? 'text-emerald-400' : reviewResult.overallScore >= 60 ? 'text-amber-400' : 'text-rose-500'
-                      }`}>
-                        {reviewResult.overallScore}%
-                      </span>
-                      <span className="text-zinc-600 text-xs">/ 100</span>
+                    <div className={`text-6xl font-black tracking-tighter ${
+                      reviewResult.overallScore >= 75 ? 'text-emerald-400' : reviewResult.overallScore >= 60 ? 'text-amber-400' : 'text-rose-500'
+                    }`}>
+                      {reviewResult.overallScore}
                     </div>
+                    <span className="text-[10px] text-zinc-600 font-mono mt-0.5">/ 100</span>
 
-                    <div className="w-full h-1 bg-zinc-850 mt-4 rounded-full overflow-hidden border border-zinc-900">
+                    <div className="w-full h-1 bg-zinc-800 rounded-full mt-4 overflow-hidden">
                       <div 
-                        className={`h-full transition-all duration-1000 ${
+                        className={`h-full rounded-full transition-all duration-1000 ${
                           reviewResult.overallScore >= 75 ? 'bg-emerald-500' : reviewResult.overallScore >= 60 ? 'bg-amber-500' : 'bg-rose-500'
                         }`} 
                         style={{ width: `${reviewResult.overallScore}%` }}
                       />
                     </div>
 
-                    <div className="w-full text-center mt-3.5 text-[10px] leading-relaxed border-t border-zinc-800/80 pt-3 flex flex-col gap-1">
-                      <span className="text-zinc-400 font-sans">
-                        {reviewResult.overallScore >= 75 ? (
-                          <strong className="text-emerald-400">✓ 安全通过：可以合入主干</strong>
-                        ) : reviewResult.overallScore >= 60 ? (
-                          <strong className="text-amber-400">⚠ 警告：建议进行人工终审</strong>
-                        ) : (
-                          <strong className="text-rose-500">❌ 拦截：检测到高危安全威胁</strong>
-                        )}
-                      </span>
-                    </div>
+                    <span className={`text-[10px] mt-3 font-semibold font-sans ${
+                      reviewResult.overallScore >= 75 ? 'text-emerald-400' : reviewResult.overallScore >= 60 ? 'text-amber-400' : 'text-rose-500'
+                    }`}>
+                      {reviewResult.overallScore >= 75 ? '通过审计 · 建议合入' : reviewResult.overallScore >= 60 ? '人工复审 · 存在风险' : '拦截 · 高危威胁'}
+                    </span>
                   </div>
 
-                  {/* Core Vector Metrics Sliders */}
-                  <div className="bg-zinc-900/30 border border-zinc-800 rounded-xl p-5 flex flex-col gap-4">
-                    <h3 className="text-[10px] text-zinc-500 uppercase tracking-widest font-bold">CORE VECTOR ANALYSIS</h3>
+                  {/* Quality Dimensions */}
+                  <div className="bg-zinc-900/30 border border-zinc-800 rounded-xl p-4 flex flex-col gap-3.5">
+                    <h3 className="text-[10px] text-zinc-500 uppercase tracking-wider font-bold">质量维度</h3>
                     
-                    <div className="space-y-4">
-                      
-                      {/* Security */}
-                      <div className="flex flex-col gap-1">
-                        <div className="flex justify-between text-xs font-mono">
-                          <span className="text-zinc-400">Security / 安全审计</span>
-                          <span className={reviewResult.scores.security >= 80 ? 'text-emerald-400' : reviewResult.scores.security >= 60 ? 'text-amber-400' : 'text-rose-400'}>
-                            {reviewResult.scores.security}% {reviewResult.scores.security >= 80 ? 'Secure' : reviewResult.scores.security >= 60 ? 'Warning' : 'Critical'}
-                          </span>
+                    {[
+                      { key: 'security', label: '安全性 Security' },
+                      { key: 'readability', label: '可读性 Readability' },
+                      { key: 'performance', label: '性能 Performance' },
+                      { key: 'robustness', label: '容错性 Robustness' },
+                    ].map(({ key, label }) => {
+                      const score = reviewResult.scores[key as keyof typeof reviewResult.scores];
+                      const color = score >= 80 ? 'emerald' : score >= 60 ? 'amber' : 'rose';
+                      return (
+                        <div key={key} className="flex flex-col gap-1">
+                          <div className="flex justify-between text-[10px] font-mono">
+                            <span className="text-zinc-400">{label}</span>
+                            <span className={`text-${color}-400`}>{score}%</span>
+                          </div>
+                          <div className="h-1 bg-zinc-800 rounded-full overflow-hidden">
+                            <div className={`h-full rounded-full bg-${color}-500 transition-all duration-1000`} style={{ width: `${score}%` }} />
+                          </div>
                         </div>
-                        <div className="h-1.5 bg-zinc-950 rounded-full overflow-hidden border border-zinc-900">
-                          <div 
-                            className={`h-full transition-all duration-1000 ${
-                              reviewResult.scores.security >= 80 ? 'bg-emerald-500' : reviewResult.scores.security >= 60 ? 'bg-amber-400' : 'bg-rose-500'
-                            }`} 
-                            style={{ width: `${reviewResult.scores.security}%` }} 
-                          />
-                        </div>
-                      </div>
-
-                      {/* Readability */}
-                      <div className="flex flex-col gap-1">
-                        <div className="flex justify-between text-xs font-mono">
-                          <span className="text-zinc-400">Readability / 代码可读</span>
-                          <span className={reviewResult.scores.readability >= 80 ? 'text-emerald-400' : reviewResult.scores.readability >= 60 ? 'text-amber-400' : 'text-rose-400'}>
-                            {reviewResult.scores.readability}% {reviewResult.scores.readability >= 80 ? 'Perfect' : reviewResult.scores.readability >= 60 ? 'Fair' : 'Poor'}
-                          </span>
-                        </div>
-                        <div className="h-1.5 bg-zinc-950 rounded-full overflow-hidden border border-zinc-900">
-                          <div 
-                            className={`h-full transition-all duration-1000 ${
-                              reviewResult.scores.readability >= 80 ? 'bg-emerald-500' : reviewResult.scores.readability >= 60 ? 'bg-amber-400' : 'bg-rose-500'
-                            }`} 
-                            style={{ width: `${reviewResult.scores.readability}%` }} 
-                          />
-                        </div>
-                      </div>
-
-                      {/* Performance */}
-                      <div className="flex flex-col gap-1">
-                        <div className="flex justify-between text-xs font-mono">
-                          <span className="text-zinc-400">Performance / 性能表现</span>
-                          <span className={reviewResult.scores.performance >= 80 ? 'text-emerald-400' : reviewResult.scores.performance >= 60 ? 'text-amber-400' : 'text-rose-400'}>
-                            {reviewResult.scores.performance}% {reviewResult.scores.performance >= 80 ? 'Optimal' : reviewResult.scores.performance >= 60 ? 'Average' : 'Laggy'}
-                          </span>
-                        </div>
-                        <div className="h-1.5 bg-zinc-950 rounded-full overflow-hidden border border-zinc-900">
-                          <div 
-                            className={`h-full transition-all duration-1000 ${
-                              reviewResult.scores.performance >= 80 ? 'bg-emerald-500' : reviewResult.scores.performance >= 60 ? 'bg-amber-400' : 'bg-rose-500'
-                            }`} 
-                            style={{ width: `${reviewResult.scores.performance}%` }} 
-                          />
-                        </div>
-                      </div>
-
-                      {/* Robustness */}
-                      <div className="flex flex-col gap-1">
-                        <div className="flex justify-between text-xs font-mono">
-                          <span className="text-zinc-400">Robustness / 容灾容错</span>
-                          <span className={reviewResult.scores.robustness >= 80 ? 'text-emerald-400' : reviewResult.scores.robustness >= 60 ? 'text-amber-400' : 'text-rose-400'}>
-                            {reviewResult.scores.robustness}% {reviewResult.scores.robustness >= 80 ? 'Robust' : reviewResult.scores.robustness >= 60 ? 'Stable' : 'Unstable'}
-                          </span>
-                        </div>
-                        <div className="h-1.5 bg-zinc-950 rounded-full overflow-hidden border border-zinc-900">
-                          <div 
-                            className={`h-full transition-all duration-1000 ${
-                              reviewResult.scores.robustness >= 80 ? 'bg-emerald-500' : reviewResult.scores.robustness >= 60 ? 'bg-amber-400' : 'bg-rose-500'
-                            }`} 
-                            style={{ width: `${reviewResult.scores.robustness}%` }} 
-                          />
-                        </div>
-                      </div>
-
-                    </div>
-
-                    {/* Smart Summary Card - Nested exactly as referenced in instructions */}
-                    <div className="mt-2 bg-zinc-900 border border-zinc-800 p-3.5 rounded-lg">
-                      <div className="flex items-center gap-2 mb-2 select-none">
-                        <span className="w-1.5 h-1.5 rounded-full bg-amber-500"></span>
-                        <span className="text-[10px] font-bold text-zinc-200">🤖 SMART SUMMARY (审计简述)</span>
-                      </div>
-                      <p className="text-[11px] text-zinc-400 leading-relaxed italic font-sans">
-                        “ {reviewResult.summary} ”
-                      </p>
-                    </div>
+                      );
+                    })}
                   </div>
 
-                  {/* Core Strategic Findings Checklist Group */}
-                  <div className="bg-zinc-900/10 border border-zinc-800 rounded-xl p-5 flex flex-col gap-3">
-                    <h3 className="text-[10px] text-zinc-500 uppercase tracking-widest font-bold">关键考量与排查 (KEY FINDINGS)</h3>
-                    <ul className="flex flex-col gap-3 text-xs">
+                  {/* PR Change Summary */}
+                  <div className="bg-zinc-900/30 border border-zinc-800 rounded-xl p-4 flex flex-col gap-2.5">
+                    <h3 className="text-[10px] text-zinc-500 uppercase tracking-wider font-bold">变更分析</h3>
+                    <p className="text-[11px] text-zinc-300 leading-relaxed font-sans">
+                      {reviewResult.summary}
+                    </p>
+                  </div>
+
+                  {/* Key Findings */}
+                  <div className="bg-zinc-900/30 border border-zinc-800 rounded-xl p-4 flex flex-col gap-3">
+                    <h3 className="text-[10px] text-zinc-500 uppercase tracking-wider font-bold">关键发现 ({reviewResult.keyFindings.length})</h3>
+                    <ul className="flex flex-col gap-2">
                       {reviewResult.keyFindings.map((finding, idx) => (
-                        <li key={idx} className="flex gap-2 bg-zinc-950/40 p-2 rounded border border-zinc-900/50">
-                          <span className="text-emerald-400 shrink-0 select-none">✔</span>
-                          <span className="font-sans text-[11px] text-zinc-300 leading-relaxed">{finding}</span>
+                        <li key={idx} className="flex items-start gap-2 text-[11px] text-zinc-300 leading-relaxed font-sans">
+                          <span className="text-emerald-400 shrink-0 select-none mt-0.5">·</span>
+                          <span>{finding}</span>
                         </li>
                       ))}
                     </ul>
@@ -691,7 +707,7 @@ export default function App() {
                 </aside>
 
                 {/* RIGHT CELL: CORE DOUBLE COLUMN DIFF COMPILER WITH INTERACTIVE REVIEW CARDS */}
-                <section className="lg:col-span-8 flex flex-col bg-zinc-900 border border-zinc-850 rounded-xl overflow-hidden shadow-2xl" id="diff_explorer">
+                <section className="lg:col-span-8 flex flex-col bg-zinc-900 border border-zinc-800 rounded-xl overflow-hidden" id="diff_explorer">
                   
                   {/* DIFF MENU & TAB MULTIPLEXER */}
                   <div className="bg-zinc-800/35 px-4 py-3.5 border-b border-zinc-850 flex flex-col sm:flex-row justify-between items-start sm:items-center gap-3">
@@ -750,11 +766,30 @@ export default function App() {
                         (c) => c.filePath === selectedFile
                       );
 
+                      const metaLineIndices: number[] = [];
+                      activeFileObj.lines.forEach((l, i) => {
+                        if (l.type === 'header' && !l.content.startsWith('@@ ')) {
+                          metaLineIndices.push(i);
+                        }
+                      });
+                      const showMeta = expandedHeaders[selectedFile] ?? false;
+
                       return (
                         <div className="min-w-[620px] font-mono text-[11px] leading-6 bg-zinc-950 rounded-md border border-zinc-900 overflow-hidden">
+                          {metaLineIndices.length > 0 && (
+                            <div
+                              onClick={() => setExpandedHeaders(prev => ({ ...prev, [selectedFile]: !showMeta }))}
+                              className="flex items-center gap-2 px-3 py-1.5 bg-zinc-900/60 cursor-pointer hover:bg-zinc-900/80 transition select-none border-b border-zinc-900"
+                            >
+                              <span className="text-[10px] text-zinc-500 transition-transform duration-200" style={{ transform: showMeta ? 'rotate(90deg)' : 'rotate(0deg)' }}>▶</span>
+                              <span className="text-[10px] text-zinc-500 font-semibold">FILE HEADER</span>
+                              <span className="text-[9px] text-zinc-700 ml-auto">{metaLineIndices.length} lines</span>
+                            </div>
+                          )}
+
                           {activeFileObj.lines.map((line, lineIdx) => {
-                            
-                            // Contextual Code Comments Mapping
+                            if (!showMeta && metaLineIndices.includes(lineIdx)) return null;
+
                             const matchedComments = activeFileComments.filter((cmt) => {
                               const trimmedLine = line.content.trim();
                               const trimmedOriginal = cmt.originalContent.trim().replace(/^[\+\-]/, "").trim();
@@ -765,38 +800,56 @@ export default function App() {
                               );
                             });
 
-                            let rowClass = "bg-zinc-950 text-zinc-500 hover:bg-zinc-900/30";
-                            let indicatorColor = "";
+                            let gutterClass = "bg-zinc-950 text-zinc-700";
+                            let rowClass = "text-zinc-400";
                             let displayPrefix = " ";
 
                             if (line.type === 'add') {
-                              rowClass = "bg-emerald-950/20 text-emerald-300 border-l-2 border-emerald-500 hover:bg-emerald-950/35";
+                              gutterClass = "bg-zinc-950 text-zinc-600";
+                              rowClass = "text-emerald-300 border-l-2 border-emerald-500/40";
                               displayPrefix = "+";
                             } else if (line.type === 'delete') {
-                              rowClass = "bg-rose-950/15 text-rose-300 border-l-2 border-rose-500 hover:bg-rose-950/25";
+                              gutterClass = "bg-zinc-950 text-zinc-600";
+                              rowClass = "text-rose-300 border-l-2 border-rose-500/40";
                               displayPrefix = "-";
                             } else if (line.type === 'header') {
-                              rowClass = "bg-zinc-900/50 text-emerald-400 font-semibold py-1.5 px-3 border-y border-zinc-900 text-[10px]";
+                              gutterClass = "bg-zinc-900/50 text-zinc-600";
+                              rowClass = "text-white font-semibold py-0.5";
                               displayPrefix = "#";
                             }
 
                             return (
                               <div key={lineIdx} className="flex flex-col">
                                 
-                                {/* Raw Line Frame */}
-                                <div className={`flex items-center group/line ${rowClass}`}>
-                                  {/* Line Numbers Gutter */}
-                                  <div className="w-10 text-right pr-2 text-zinc-700 select-none border-r border-zinc-900 bg-zinc-950 text-[10px] shrink-0">
+                                <div className={`flex items-center group/line ${line.type === 'header' ? 'bg-zinc-900/50 text-[10px]' : 'bg-zinc-950 hover:bg-zinc-900/20'} ${rowClass}`}>
+                                  <div className={`w-10 text-right pr-2 select-none border-r border-zinc-900/80 text-[10px] shrink-0 py-px group-hover/line:bg-zinc-900/20 ${gutterClass}`}>
                                     {line.oldLine || ""}
                                   </div>
-                                  <div className="w-10 text-right pr-2 text-zinc-700 select-none border-r border-zinc-900 bg-zinc-950 text-[10px] shrink-0">
+                                  <div className={`w-10 text-right pr-2 select-none border-r border-zinc-900/80 text-[10px] shrink-0 py-px group-hover/line:bg-zinc-900/20 ${gutterClass}`}>
                                     {line.newLine || ""}
                                   </div>
 
-                                  {/* Clean Text Code Content */}
-                                  <div className="flex-1 pl-3 font-mono whitespace-pre break-all select-text text-zinc-300">
+                                  <div className="flex-1 pl-3 font-mono whitespace-pre break-all select-text py-px">
                                     <span className="text-zinc-600 select-none inline-block w-3">{displayPrefix}</span>
                                     {line.content}
+                                    {reviewResult?.codeBlocks && (() => {
+                                      const matchedBlock = reviewResult.codeBlocks.find(
+                                        (b) => b.filePath === selectedFile && b.lineNumber === line.newLine
+                                      );
+                                      if (matchedBlock) {
+                                        return (
+                                          <span className="ml-2 text-[9px] bg-blue-950/50 text-blue-400/80 px-1.5 py-0.5 rounded font-mono select-none inline-flex items-center gap-1">
+                                            <span className="text-blue-500">
+                                              {matchedBlock.type === 'function' ? '\u0192' :
+                                               matchedBlock.type === 'class' ? 'C' :
+                                               matchedBlock.type === 'interface' ? 'I' : 'E'}
+                                            </span>
+                                            {matchedBlock.name}
+                                          </span>
+                                        );
+                                      }
+                                      return null;
+                                    })()}
                                   </div>
                                 </div>
 
@@ -889,24 +942,6 @@ export default function App() {
                       );
                     })()}
 
-                    {/* Scanner aesthetic overlay */}
-                    <div className="absolute bottom-0 left-0 right-0 h-1/5 bg-gradient-to-t from-emerald-500/10 via-emerald-500/0 to-transparent pointer-events-none" />
-
-                  </div>
-
-                  {/* HIGH ACCENT METADATA FOOTER STATUS BAR */}
-                  <div className="h-8 bg-zinc-950 border-t border-zinc-850 px-4 flex items-center justify-between shrink-0 font-mono text-[10px] text-zinc-500 select-none">
-                    <div className="flex items-center gap-4">
-                      <span className="flex items-center gap-1.5 text-emerald-400">
-                        <span className="w-1.5 h-1.5 rounded-full bg-emerald-500 animate-pulse"></span>
-                        STATIC SCANNER READY
-                      </span>
-                      <span className="hidden md:inline">LATENCY: 124ms</span>
-                      <span className="hidden sm:inline">SECURITY LEVEL: ULTRA</span>
-                    </div>
-                    <div className="text-zinc-500 uppercase font-bold text-[9px] bg-zinc-900 px-2 py-0.5 rounded border border-zinc-800">
-                      TOKEN OPTIMAL: OK + LINTED
-                    </div>
                   </div>
 
                 </section>
