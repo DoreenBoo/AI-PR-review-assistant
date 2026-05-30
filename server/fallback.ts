@@ -466,6 +466,55 @@ export function inferImpactFromDiff(diffText: string, semantics: { impactScope: 
   };
 }
 
+export function inferTestQualityFromDiff(diffText: string): EngineeringScore {
+  const paths = getFilePaths(diffText);
+  const testPatterns = ['.test.', '.spec.', '__tests__', '/test/', '/tests/', '/spec/', '/__mocks__/'];
+  const hasTestFiles = paths.some(p => testPatterns.some(pat => p.includes(pat)));
+
+  if (!hasTestFiles) {
+    return {
+      score: 50,
+      highlights: [],
+      suggestions: ['本次变更未包含测试代码，建议为新功能或修复补充单元测试'],
+      _inferred: true,
+    };
+  }
+
+  const addedLines = getAddedLines(diffText);
+  const hasAssertions = addedLines.some(l => /\b(?:expect|assert|assertThat|assertEquals|test|it|describe)\b/.test(l));
+  const hasHappyPath = hasAssertions;
+  const hasErrorPath = addedLines.some(l => /\b(?:catch|throw|reject|error|fail|exception)\b/i.test(l));
+  const hasMockUsage = addedLines.some(l => /\b(?:mock|stub|spy|jest\.fn|vi\.fn|sinon)\b/i.test(l));
+
+  let score = 70;
+  const highlights: string[] = [];
+  const suggestions: string[] = [];
+
+  if (hasHappyPath) {
+    highlights.push('测试代码包含断言逻辑');
+    score += 10;
+  } else {
+    suggestions.push('测试代码缺少有效断言，建议补充有意义的验证');
+    score -= 20;
+  }
+
+  if (!hasErrorPath) {
+    suggestions.push('测试代码未覆盖异常/错误场景，建议补充边界和异常路径测试');
+    score -= 15;
+  }
+
+  if (!hasMockUsage) {
+    suggestions.push('考虑使用Mock隔离外部依赖，提升测试独立性');
+  }
+
+  return {
+    score: Math.max(20, Math.min(100, score)),
+    highlights,
+    suggestions,
+    _inferred: true,
+  };
+}
+
 function getChineseDescription(category: SecurityVulnerability['category']): string {
   const map: Record<string, string> = {
     sql_injection: '检测到可能的SQL注入风险，字符串拼接构建查询语句',
