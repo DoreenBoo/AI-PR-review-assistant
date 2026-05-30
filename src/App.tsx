@@ -1,4 +1,4 @@
-import React, { useState, useMemo } from "react";
+import React, { useState, useMemo, useRef, useCallback } from "react";
 import { 
   motion, 
   AnimatePresence 
@@ -27,7 +27,7 @@ import {
   Sliders,
   FileText
 } from "lucide-react";
-import { PrReviewResult, ReviewComment } from "./types";
+import { PrReviewResult, ReviewComment, AiModel } from "./types";
 
 // ==========================================
 // PRESET MOCK DATA FOR DEMO PURPOSES
@@ -151,12 +151,15 @@ export default function App() {
   const [loadingStep, setLoadingStep] = useState("");
   const [reviewResult, setReviewResult] = useState<PrReviewResult>(MOCK_REVIEW_RESULT);
   const [errorMessage, setErrorMessage] = useState("");
+  const [selectedModel, setSelectedModel] = useState<AiModel>('deepseek');
   
   // Custom checklist representing resolved issues
   const [resolvedIssues, setResolvedIssues] = useState<Record<string, boolean>>({});
   const [selectedFile, setSelectedFile] = useState<string>("");
   const [copiedCodeId, setCopiedCodeId] = useState<string | null>(null);
   const [expandedHeaders, setExpandedHeaders] = useState<Record<string, boolean>>({});
+  const [showFileDropdown, setShowFileDropdown] = useState(false);
+  const fileTabsRef = useRef<HTMLDivElement>(null);
 
   // Parse the Unified Patch / Diff
   const parsedFiles = useMemo(() => {
@@ -259,7 +262,7 @@ export default function App() {
 
     try {
       setTimeout(() => {
-        setLoadingStep("正在触发 Gemini 3.5-flash AI 审计引擎进行安全性静态扫描...");
+        setLoadingStep(`正在触发 ${selectedModel === 'deepseek' ? 'DeepSeek-V4-Pro' : 'Gemini 3.5-flash'} AI 审计引擎进行安全性静态扫描...`);
       }, 1000);
 
       setTimeout(() => {
@@ -272,6 +275,7 @@ export default function App() {
         body: JSON.stringify({
           url: prUrl,
           diff: pastedDiff || null,
+          model: selectedModel,
         }),
       });
 
@@ -343,21 +347,7 @@ export default function App() {
           </div>
         </div>
 
-        {/* Small Inline Micro-Form inside the Header */}
-        <div className="hidden lg:flex flex-1 max-w-xl px-8">
-          <div className="relative w-full">
-            <input 
-              type="text" 
-              value={prUrl || "粘贴 PR 地址以快速开启极速审计"} 
-              onChange={(e) => setPrUrl(e.target.value)}
-              placeholder="Paste GitHub URL..."
-              className="w-full bg-zinc-900/60 border border-zinc-800 text-xs py-1.5 px-3.5 rounded-md text-zinc-400 focus:outline-none focus:border-emerald-500/50 focus:bg-zinc-900 font-mono transition"
-            />
-            <div className="absolute right-2 top-1.5 flex items-center gap-2 select-none">
-              <span className="text-[9px] bg-zinc-800 px-1.5 py-0.5 rounded text-zinc-500 border border-zinc-800">AUTOMATIC</span>
-            </div>
-          </div>
-        </div>
+
 
         <div className="flex items-center gap-3">
           <button 
@@ -368,17 +358,14 @@ export default function App() {
             演示示例
           </button>
 
-          <div className="flex items-center gap-1.5 bg-zinc-900 px-3 py-1.5 rounded border border-zinc-800 font-mono text-[10px] text-emerald-400 select-none">
-            <span className="w-1.5 h-1.5 rounded-full bg-emerald-500 animate-pulse inline-block" />
-            <span>AGENT_ONLINE</span>
-          </div>
+          
         </div>
       </header>
 
       {/* DETAILED TELESCOPIC SUBHEADER FOR SYSTEM STATUS */}
       <div className="bg-zinc-900/40 border-b border-zinc-900 px-6 py-2 flex items-center justify-between text-[10px] text-zinc-500 select-none">
         <div className="flex items-center gap-4">
-          <span className="flex items-center gap-1"><Terminal className="w-3 h-3 text-zinc-600" /> STABLE REVISION ENGINE: <strong>GEMINI-3.5-FLASH</strong></span>
+          <span className="flex items-center gap-1"><Terminal className="w-3 h-3 text-zinc-600" /> STABLE REVISION ENGINE: <strong>{selectedModel === 'deepseek' ? 'DEEPSEEK-V4-PRO' : 'GEMINI-3.5-FLASH'}</strong></span>
           <span className="hidden sm:inline text-zinc-700">|</span>
           <span className="hidden sm:inline">PROMPT SCHEMA: STRICT_JSON</span>
         </div>
@@ -484,6 +471,32 @@ export default function App() {
               </span>
               
               <div className="flex items-center gap-3 w-full sm:w-auto justify-end">
+                <div className="flex items-center gap-2 relative">
+                  <label className="text-[10px] text-zinc-500 font-bold uppercase tracking-wider whitespace-nowrap">模型:</label>
+                  <div className="relative">
+                    <div className={`absolute -inset-[1px] rounded-md bg-gradient-to-r ${
+                      selectedModel === 'deepseek' ? 'from-blue-500/60 to-cyan-500/60' : 'from-amber-500/60 to-orange-500/60'
+                    } opacity-80 blur-[2px]`} />
+                    <select
+                      value={selectedModel}
+                      onChange={(e) => setSelectedModel(e.target.value as AiModel)}
+                      className="relative bg-zinc-950 border border-zinc-700 hover:border-zinc-500 focus:border-emerald-500 focus:outline-none rounded-md pl-8 pr-8 py-2 text-[11px] font-mono font-bold text-zinc-200 cursor-pointer transition appearance-none"
+                      style={{
+                        backgroundImage: `url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='14' height='14' viewBox='0 0 24 24' fill='none' stroke='%23a1a1aa' stroke-width='2.5' stroke-linecap='round' stroke-linejoin='round'%3E%3Cpolyline points='6 9 12 15 18 9'%3E%3C/polyline%3E%3C/svg%3E")`,
+                        backgroundRepeat: 'no-repeat',
+                        backgroundPosition: 'right 8px center',
+                      }}
+                    >
+                      <option value="deepseek">DeepSeek-V4-Pro</option>
+                      <option value="gemini">Gemini 3.5 Flash</option>
+                    </select>
+                    <span className={`absolute left-2.5 top-1/2 -translate-y-1/2 text-xs pointer-events-none ${
+                      selectedModel === 'deepseek' ? 'text-blue-400' : 'text-amber-400'
+                    }`}>
+                      {selectedModel === 'deepseek' ? '🔵' : '💎'}
+                    </span>
+                  </div>
+                </div>
                 <button
                   type="submit"
                   disabled={loading}
@@ -593,32 +606,37 @@ export default function App() {
                   )}
 
                   {/* Semantics section — always shown when available */}
-                  <div className="flex flex-col gap-2">
-                    <div className="flex items-center gap-2">
-                      <span className="text-[10px] text-zinc-500 uppercase tracking-wider font-bold">变更分析</span>
+                  <div className="flex flex-col gap-3 bg-zinc-950/50 border border-zinc-800 rounded-lg p-5 relative overflow-hidden">
+                    <div className="absolute top-0 left-0 bottom-0 w-1 bg-gradient-to-b from-emerald-500 via-amber-500 to-rose-500" />
+                    <div className="flex items-center gap-2.5">
+                      <span className="text-xs text-emerald-400 uppercase tracking-[0.2em] font-black">变更分析</span>
                       {reviewResult.semantics?.riskLevel && (
-                        <span className={`text-[9px] px-1.5 py-0.5 rounded font-mono font-bold ${
-                          reviewResult.semantics.riskLevel === 'high' ? 'bg-rose-950 text-rose-400' :
-                          reviewResult.semantics.riskLevel === 'medium' ? 'bg-amber-950 text-amber-400' :
-                          'bg-emerald-950 text-emerald-400'
+                        <span className={`text-xs px-2.5 py-1 rounded font-black font-mono shadow-lg ${
+                          reviewResult.semantics.riskLevel === 'high' ? 'bg-rose-600/80 text-white shadow-rose-500/30' :
+                          reviewResult.semantics.riskLevel === 'medium' ? 'bg-amber-500/80 text-zinc-950 shadow-amber-500/30' :
+                          'bg-emerald-500/80 text-zinc-950 shadow-emerald-500/30'
                         }`}>
-                          {reviewResult.semantics.riskLevel === 'high' ? 'HIGH RISK' :
-                           reviewResult.semantics.riskLevel === 'medium' ? 'MEDIUM' : 'LOW'}
+                          {reviewResult.semantics.riskLevel === 'high' ? '⚠ HIGH RISK' :
+                           reviewResult.semantics.riskLevel === 'medium' ? '⚡ MEDIUM' : '✓ LOW'}
                         </span>
                       )}
                     </div>
                     {reviewResult.semantics?.intent && (
-                      <p className="text-[12px] text-white leading-relaxed font-sans">
+                      <p className="text-xl font-bold text-white leading-snug tracking-tight">
                         {reviewResult.semantics.intent}
                       </p>
                     )}
                     {reviewResult.semantics?.impactScope && reviewResult.semantics.impactScope.length > 0 && (
-                      <div className="flex items-center gap-2 text-[10px]">
-                        <span className="text-zinc-500 shrink-0">📌 影响范围</span>
-                        <span className="text-zinc-400">{reviewResult.semantics.impactScope.join(' · ')}</span>
+                      <div className="flex flex-wrap items-center gap-2">
+                        <span className="text-xs text-zinc-500 font-bold shrink-0">📌 影响范围</span>
+                        {reviewResult.semantics.impactScope.map((scope, idx) => (
+                          <span key={idx} className="text-[11px] bg-zinc-800 text-zinc-300 px-2.5 py-1 rounded-full font-sans border border-zinc-700">
+                            {scope}
+                          </span>
+                        ))}
                       </div>
                     )}
-                    <p className="text-[10px] text-zinc-500 leading-relaxed font-sans border-t border-zinc-800/60 pt-2">
+                    <p className="text-sm text-zinc-400 leading-relaxed font-sans border-t border-zinc-800/60 pt-3">
                       {reviewResult.summary}
                     </p>
                   </div>
@@ -710,7 +728,11 @@ export default function App() {
 
                     <span className="text-[10px] text-zinc-500 uppercase tracking-wider font-bold shrink-0">文件</span>
                     
-                    <div className="flex-1 overflow-x-auto flex gap-1 hide-scrollbar">
+                    <div
+                      ref={fileTabsRef}
+                                            className="flex-1 overflow-x-auto flex gap-1 hide-scrollbar cursor-default"
+                      title="滚轮切换文件"
+                    >
                       {parsedFiles.map((fFile) => {
                         const count = (reviewResult?.comments || []).filter(c => c.filePath === fFile.fileName).length;
                         const active = fFile.fileName === selectedFile;
@@ -733,8 +755,47 @@ export default function App() {
                       })}
                     </div>
 
-                    {parsedFiles.length > 5 && (
-                      <span className="text-[10px] text-zinc-300 font-bold font-mono shrink-0">{parsedFiles.length} files</span>
+                    {parsedFiles.length > 1 && (
+                      <div className="relative shrink-0">
+                        <button
+                          onClick={() => setShowFileDropdown(!showFileDropdown)}
+                          className="flex items-center gap-1.5 text-[10px] text-zinc-300 font-bold font-mono bg-zinc-800/60 hover:bg-zinc-700/60 px-2 py-1 rounded border border-zinc-700 hover:border-zinc-500 transition cursor-pointer"
+                          title="点击选择文件"
+                        >
+                          <span>{parsedFiles.length} files</span>
+                          <span className={`text-zinc-500 transition-transform duration-200 ${showFileDropdown ? 'rotate-180' : ''}`}>▼</span>
+                        </button>
+                        {showFileDropdown && (
+                          <>
+                            <div className="fixed inset-0 z-10" onClick={() => setShowFileDropdown(false)} />
+                            <div className="absolute right-0 top-full mt-1 z-20 bg-zinc-900 border border-zinc-700 rounded-lg shadow-2xl min-w-[220px] max-h-[280px] overflow-y-auto py-1">
+                              {parsedFiles.map((fFile) => {
+                                const count = (reviewResult?.comments || []).filter(c => c.filePath === fFile.fileName).length;
+                                const active = fFile.fileName === selectedFile;
+                                return (
+                                  <button
+                                    key={fFile.fileName}
+                                    onClick={() => { setSelectedFile(fFile.fileName); setShowFileDropdown(false); }}
+                                    className={`w-full text-left px-3 py-1.5 text-[10px] font-mono flex items-center justify-between gap-2 transition cursor-pointer ${
+                                      active
+                                        ? 'bg-emerald-500/10 text-emerald-400 font-bold'
+                                        : 'text-zinc-400 hover:bg-zinc-800 hover:text-zinc-200'
+                                    }`}
+                                  >
+                                    <span className="truncate">{fFile.fileName.split('/').pop()}</span>
+                                    <div className="flex items-center gap-1.5 shrink-0">
+                                      {count > 0 && (
+                                        <span className="px-1 bg-rose-950 text-rose-400 text-[9px] rounded font-bold">{count}</span>
+                                      )}
+                                      {active && <span className="text-emerald-400 text-[8px]">●</span>}
+                                    </div>
+                                  </button>
+                                );
+                              })}
+                            </div>
+                          </>
+                        )}
+                      </div>
                     )}
 
                   </div>
@@ -948,7 +1009,7 @@ export default function App() {
       {/* FOOTER */}
       <footer className="border-t border-zinc-900 py-6 text-center text-[11px] text-zinc-500 bg-zinc-950 mt-12 shrink-0">
         <div className="max-w-7xl mx-auto px-6 flex flex-col md:flex-row justify-between items-center gap-4">
-          <p className="font-sans">© 2026 AI PR Reviewer Pro. 极简全栈架构设计.</p>
+          <p className="font-sans">© 2026 AI PR Reviewer Pro. @DODO @小何先生 设计.</p>
           <div className="flex items-center gap-3 font-mono">
             <span className="text-emerald-500/80">HTTPS SECURE TRANSMISSION</span>
             <span>•</span>
