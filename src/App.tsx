@@ -25,7 +25,7 @@ import {
   Github, 
   ArrowRight,
   Sliders,
-  Code
+  FileText
 } from "lucide-react";
 import { PrReviewResult, ReviewComment } from "./types";
 
@@ -121,7 +121,7 @@ index c6b9e31..fd821ac 100644
 };
 
 function decodeGitOctalEscapes(diffText: string): string {
-  return diffText.replace(
+  let result = diffText.replace(
     /"([^"]*\\[0-7]{3}[^"]*)"/g,
     (match) => {
       const inner = match.slice(1, -1);
@@ -140,6 +140,8 @@ function decodeGitOctalEscapes(diffText: string): string {
       return '"' + decoder.decode(new Uint8Array(bytes)) + '"';
     }
   );
+  result = result.replace(/\x1b\[[0-9;]*[a-zA-Z]/g, '');
+  return result;
 }
 
 export default function App() {
@@ -409,47 +411,59 @@ export default function App() {
             </div>
 
             <div className="grid grid-cols-1 gap-4">
-              <div>
-                <label className="block text-[10px] text-zinc-500 font-bold uppercase tracking-wider mb-1.5">
-                  GitHub Pull Request 网址 (PUBLIC REPOSITORY ONLY)
-                </label>
-                <div className="relative">
-                  <span className="absolute left-3.5 top-2.5 text-zinc-600">
-                    <Github className="w-4.5 h-4.5" />
-                  </span>
+              {!pastedDiff && (
+                <div>
+                  <div className="flex justify-between items-center mb-1.5">
+                    <label className="flex items-center gap-1.5 text-[10px] text-zinc-500 font-bold uppercase tracking-wider">
+                      GitHub Pull Request 网址 (PUBLIC REPOSITORY ONLY)
+                      <Github className={`w-3.5 h-3.5 transition-colors ${prUrl ? 'text-emerald-400' : 'text-zinc-600'}`} />
+                    </label>
+                    {prUrl && (
+                      <button 
+                        type="button" 
+                        onClick={() => setPrUrl("")}
+                        className="text-[10px] text-rose-400 hover:text-rose-300 font-bold underline cursor-pointer"
+                      >
+                        清空输入框
+                      </button>
+                    )}
+                  </div>
                   <input
                     type="url"
                     value={prUrl}
                     onChange={(e) => setPrUrl(e.target.value)}
                     placeholder="例如: https://github.com/facebook/react/pull/24185"
-                    className="w-full bg-zinc-950 border border-zinc-800 hover:border-zinc-700 focus:border-emerald-500 focus:outline-none rounded px-4 py-2 text-xs font-mono text-zinc-200 placeholder-zinc-700 transition"
+                    className="w-full bg-zinc-950 border border-zinc-800 hover:border-zinc-700 focus:border-emerald-500 focus:outline-none rounded px-4 py-2 text-xs font-mono text-zinc-200 placeholder-zinc-600 transition"
                   />
                 </div>
-              </div>
+              )}
 
-              <div>
-                <div className="flex justify-between items-center mb-1.5 text-[10px]">
-                  <span className="text-zinc-500 font-bold uppercase tracking-wider">
-                    或者直接贴入 UNIFIED RAW PATCH / GIT DIFF TEXT
-                  </span>
-                  {pastedDiff && (
-                    <button 
-                      type="button" 
-                      onClick={() => setPastedDiff("")}
-                      className="text-rose-400 hover:text-rose-300 font-bold underline cursor-pointer"
-                    >
-                      清空输入框
-                    </button>
-                  )}
+              {!prUrl && (
+                <div>
+                  <div className="flex justify-between items-center mb-1.5 text-[10px]">
+                    <span className="flex items-center gap-1.5 text-zinc-500 font-bold uppercase tracking-wider">
+                      贴入 UNIFIED RAW PATCH / GIT DIFF TEXT
+                      <FileText className={`w-3.5 h-3.5 transition-colors ${pastedDiff ? 'text-emerald-400' : 'text-zinc-500'}`} />
+                    </span>
+                    {pastedDiff && (
+                      <button 
+                        type="button" 
+                        onClick={() => setPastedDiff("")}
+                        className="text-rose-400 hover:text-rose-300 font-bold underline cursor-pointer"
+                      >
+                        清空输入框
+                      </button>
+                    )}
+                  </div>
+                  <textarea
+                    value={pastedDiff}
+                    onChange={(e) => setPastedDiff(e.target.value)}
+                    rows={4}
+                    placeholder={`--- a/src/index.ts\n+++ b/src/index.ts\n@@ -2,3 +2,4 @@\n- console.log("old");\n+ console.log("new code changes");`}
+                    className="w-full block bg-zinc-950 border border-zinc-800 hover:border-zinc-700 focus:border-emerald-500 focus:outline-none p-4 rounded text-xs leading-relaxed text-zinc-200 font-mono placeholder-zinc-600 scrollbar-thin"
+                  />
                 </div>
-                <textarea
-                  value={pastedDiff}
-                  onChange={(e) => setPastedDiff(e.target.value)}
-                  rows={4}
-                  placeholder={`--- a/src/index.ts\n+++ b/src/index.ts\n@@ -2,3 +2,4 @@\n- console.log("old");\n+ console.log("new code changes");`}
-                  className="w-full block bg-zinc-950 border border-zinc-800 hover:border-zinc-700 focus:border-emerald-500 focus:outline-none p-4 rounded text-xs leading-relaxed text-emerald-300/90 font-mono scrollbar-thin"
-                />
-              </div>
+              )}
             </div>
 
             {/* Error Message Panel */}
@@ -539,9 +553,9 @@ export default function App() {
                 </div>
               )}
               
-              {(reviewResult.metadata || reviewResult.semantics) && (
+              {((reviewResult.metadata || reviewResult.semantics) && (reviewResult.semantics?.intent || reviewResult.semantics?.impactScope?.length || reviewResult.summary)) && (
                 <div className="bg-zinc-900/40 border border-zinc-800 rounded-xl p-5 flex flex-col gap-3" id="metadata_panel">
-                  {reviewResult.metadata ? (
+                  {reviewResult.metadata && (
                     <>
                       <div className="flex items-center justify-between">
                         <div className="flex items-center gap-2">
@@ -549,16 +563,6 @@ export default function App() {
                           <span className="text-xs text-zinc-400 font-mono">
                             PR #{reviewResult.metadata.pullNumber}
                           </span>
-                          {reviewResult.semantics?.riskLevel && (
-                            <span className={`text-[9px] px-1.5 py-0.5 rounded font-mono font-bold ${
-                              reviewResult.semantics.riskLevel === 'high' ? 'bg-rose-950 text-rose-400' :
-                              reviewResult.semantics.riskLevel === 'medium' ? 'bg-amber-950 text-amber-400' :
-                              'bg-emerald-950 text-emerald-400'
-                            }`}>
-                              {reviewResult.semantics.riskLevel === 'high' ? 'HIGH RISK' :
-                               reviewResult.semantics.riskLevel === 'medium' ? 'MEDIUM' : 'LOW'}
-                            </span>
-                          )}
                         </div>
                         <div className="flex items-center gap-3 text-[10px] text-zinc-500 font-mono">
                           <span>👤 {reviewResult.metadata.author}</span>
@@ -582,45 +586,42 @@ export default function App() {
                             🔗 Issues: {reviewResult.metadata.linkedIssues.map(i => `#${i.number}`).join(' · ')}
                           </span>
                         )}
-                        {reviewResult.semantics?.impactScope && reviewResult.semantics.impactScope.length > 0 && (
-                          <span className="text-zinc-500 ml-2">
-                            📌 影响范围: {reviewResult.semantics.impactScope.join(' · ')}
-                          </span>
-                        )}
-                      </div>
-                    </>
-                  ) : (
-                    <>
-                      <div className="flex items-center gap-2">
-                        <span className="text-[10px] text-zinc-500 uppercase tracking-wider font-bold">变更总结</span>
-                        {reviewResult.semantics?.riskLevel && (
-                          <span className={`text-[9px] px-1.5 py-0.5 rounded font-mono font-bold ${
-                            reviewResult.semantics.riskLevel === 'high' ? 'bg-rose-950 text-rose-400' :
-                            reviewResult.semantics.riskLevel === 'medium' ? 'bg-amber-950 text-amber-400' :
-                            'bg-emerald-950 text-emerald-400'
-                          }`}>
-                            {reviewResult.semantics.riskLevel === 'high' ? 'HIGH RISK' :
-                             reviewResult.semantics.riskLevel === 'medium' ? 'MEDIUM' : 'LOW'}
-                          </span>
-                        )}
                       </div>
 
-                      {reviewResult.semantics?.intent && (
-                        <p className="text-[12px] text-white leading-relaxed font-sans">
-                          {reviewResult.semantics.intent}
-                        </p>
-                      )}
-
-                      {reviewResult.semantics?.impactScope && reviewResult.semantics.impactScope.length > 0 && (
-                        <div className="flex items-start gap-2 text-[10px]">
-                          <span className="text-zinc-500 shrink-0 mt-0.5">📌</span>
-                          <span className="text-zinc-400">
-                            {reviewResult.semantics.impactScope.join(' · ')}
-                          </span>
-                        </div>
-                      )}
+                      <div className="border-t border-zinc-800/60 my-1" />
                     </>
                   )}
+
+                  {/* Semantics section — always shown when available */}
+                  <div className="flex flex-col gap-2">
+                    <div className="flex items-center gap-2">
+                      <span className="text-[10px] text-zinc-500 uppercase tracking-wider font-bold">变更分析</span>
+                      {reviewResult.semantics?.riskLevel && (
+                        <span className={`text-[9px] px-1.5 py-0.5 rounded font-mono font-bold ${
+                          reviewResult.semantics.riskLevel === 'high' ? 'bg-rose-950 text-rose-400' :
+                          reviewResult.semantics.riskLevel === 'medium' ? 'bg-amber-950 text-amber-400' :
+                          'bg-emerald-950 text-emerald-400'
+                        }`}>
+                          {reviewResult.semantics.riskLevel === 'high' ? 'HIGH RISK' :
+                           reviewResult.semantics.riskLevel === 'medium' ? 'MEDIUM' : 'LOW'}
+                        </span>
+                      )}
+                    </div>
+                    {reviewResult.semantics?.intent && (
+                      <p className="text-[12px] text-white leading-relaxed font-sans">
+                        {reviewResult.semantics.intent}
+                      </p>
+                    )}
+                    {reviewResult.semantics?.impactScope && reviewResult.semantics.impactScope.length > 0 && (
+                      <div className="flex items-center gap-2 text-[10px]">
+                        <span className="text-zinc-500 shrink-0">📌 影响范围</span>
+                        <span className="text-zinc-400">{reviewResult.semantics.impactScope.join(' · ')}</span>
+                      </div>
+                    )}
+                    <p className="text-[10px] text-zinc-500 leading-relaxed font-sans border-t border-zinc-800/60 pt-2">
+                      {reviewResult.summary}
+                    </p>
+                  </div>
                 </div>
               )}
               
@@ -630,6 +631,22 @@ export default function App() {
                 {/* SIDEBAR: PR CHANGE SUMMARY PANEL */}
                 <aside className="lg:col-span-4 flex flex-col gap-5" id="sidebar_analytics">
                   
+                  {/* Key Findings — moved above score */}
+                  <div className="bg-zinc-900/30 border border-zinc-800 rounded-xl p-4 flex flex-col gap-3">
+                    <div className="flex items-center gap-2">
+                      <AlertTriangle className="w-3.5 h-3.5 text-amber-400" />
+                      <h3 className="text-[10px] text-zinc-500 uppercase tracking-wider font-bold">关键发现 ({reviewResult.keyFindings.length})</h3>
+                    </div>
+                    <ul className="flex flex-col gap-2.5">
+                      {reviewResult.keyFindings.map((finding, idx) => (
+                        <li key={idx} className="flex items-start gap-2 text-[11px] text-zinc-300 leading-relaxed font-sans">
+                          <span className="text-amber-400 shrink-0 select-none mt-0.5 font-bold">{idx + 1}.</span>
+                          <span>{finding}</span>
+                        </li>
+                      ))}
+                    </ul>
+                  </div>
+
                   {/* Score Card */}
                   <div className="bg-zinc-900/40 border border-zinc-800 rounded-xl p-5 flex flex-col items-center">
                     <span className="text-[10px] text-zinc-500 uppercase tracking-wider font-bold mb-3">综合评分</span>
@@ -683,47 +700,17 @@ export default function App() {
                     })}
                   </div>
 
-                  {/* PR Change Summary */}
-                  <div className="bg-zinc-900/30 border border-zinc-800 rounded-xl p-4 flex flex-col gap-2.5">
-                    <h3 className="text-[10px] text-zinc-500 uppercase tracking-wider font-bold">变更分析</h3>
-                    <p className="text-[11px] text-zinc-300 leading-relaxed font-sans">
-                      {reviewResult.summary}
-                    </p>
-                  </div>
-
-                  {/* Key Findings */}
-                  <div className="bg-zinc-900/30 border border-zinc-800 rounded-xl p-4 flex flex-col gap-3">
-                    <h3 className="text-[10px] text-zinc-500 uppercase tracking-wider font-bold">关键发现 ({reviewResult.keyFindings.length})</h3>
-                    <ul className="flex flex-col gap-2">
-                      {reviewResult.keyFindings.map((finding, idx) => (
-                        <li key={idx} className="flex items-start gap-2 text-[11px] text-zinc-300 leading-relaxed font-sans">
-                          <span className="text-emerald-400 shrink-0 select-none mt-0.5">·</span>
-                          <span>{finding}</span>
-                        </li>
-                      ))}
-                    </ul>
-                  </div>
-
-                </aside>
+                  </aside>
 
                 {/* RIGHT CELL: CORE DOUBLE COLUMN DIFF COMPILER WITH INTERACTIVE REVIEW CARDS */}
                 <section className="lg:col-span-8 flex flex-col bg-zinc-900 border border-zinc-800 rounded-xl overflow-hidden" id="diff_explorer">
                   
-                  {/* DIFF MENU & TAB MULTIPLEXER */}
-                  <div className="bg-zinc-800/35 px-4 py-3.5 border-b border-zinc-850 flex flex-col sm:flex-row justify-between items-start sm:items-center gap-3">
-                    
-                    {/* Active File Name Indicator with mini LED dots */}
-                    <div className="flex items-center gap-2 font-mono text-xs">
-                      <Code className="w-4 h-4 text-emerald-400 shrink-0" />
-                      <span className="text-zinc-400">Auditing: </span>
-                      <strong className="text-white text-xs truncate max-w-sm">{selectedFile || "N/A"}</strong>
-                      <div className="flex gap-1 ml-2 select-none">
-                        <div className="w-1.5 h-1.5 rounded-full bg-emerald-500/80"></div>
-                        <div className="w-1.5 h-1.5 rounded-full bg-rose-500/80"></div>
-                      </div>
-                    </div>
+                  {/* FILE SELECTOR BAR */}
+                  <div className="bg-zinc-800/35 px-4 py-2 border-b border-zinc-800 flex items-center gap-3">
 
-                    <div className="flex flex-wrap gap-1 w-full sm:w-auto">
+                    <span className="text-[10px] text-zinc-500 uppercase tracking-wider font-bold shrink-0">文件</span>
+                    
+                    <div className="flex-1 overflow-x-auto flex gap-1 hide-scrollbar">
                       {parsedFiles.map((fFile) => {
                         const count = (reviewResult?.comments || []).filter(c => c.filePath === fFile.fileName).length;
                         const active = fFile.fileName === selectedFile;
@@ -731,20 +718,24 @@ export default function App() {
                           <button
                             key={fFile.fileName}
                             onClick={() => setSelectedFile(fFile.fileName)}
-                            className={`px-2.5 py-1 text-[10px] font-mono border rounded transition-all cursor-pointer ${
+                            className={`px-2.5 py-1 text-[10px] font-mono border rounded transition-all shrink-0 cursor-pointer flex items-center gap-1 ${
                               active 
                                 ? 'bg-zinc-950 border-emerald-500/40 text-white font-semibold' 
-                                : 'bg-zinc-900/40 border-zinc-800 text-zinc-500 hover:text-zinc-300'
+                                : 'bg-zinc-900/40 border-zinc-800 text-zinc-500 hover:text-zinc-300 hover:border-zinc-700'
                             }`}
                           >
-                            {fFile.fileName.split('/').pop()}
+                            <span className="truncate max-w-[160px]">{fFile.fileName.split('/').pop()}</span>
                             {count > 0 && (
-                              <span className="ml-1 px-1 bg-rose-950 text-rose-400 text-[9px] rounded font-bold">{count}</span>
+                              <span className="px-1 bg-rose-950 text-rose-400 text-[9px] rounded font-bold">{count}</span>
                             )}
                           </button>
                         );
                       })}
                     </div>
+
+                    {parsedFiles.length > 5 && (
+                      <span className="text-[10px] text-zinc-300 font-bold font-mono shrink-0">{parsedFiles.length} files</span>
+                    )}
 
                   </div>
 
@@ -768,7 +759,7 @@ export default function App() {
 
                       const metaLineIndices: number[] = [];
                       activeFileObj.lines.forEach((l, i) => {
-                        if (l.type === 'header' && !l.content.startsWith('@@ ')) {
+                        if (l.type === 'header') {
                           metaLineIndices.push(i);
                         }
                       });
@@ -781,9 +772,9 @@ export default function App() {
                               onClick={() => setExpandedHeaders(prev => ({ ...prev, [selectedFile]: !showMeta }))}
                               className="flex items-center gap-2 px-3 py-1.5 bg-zinc-900/60 cursor-pointer hover:bg-zinc-900/80 transition select-none border-b border-zinc-900"
                             >
-                              <span className="text-[10px] text-zinc-500 transition-transform duration-200" style={{ transform: showMeta ? 'rotate(90deg)' : 'rotate(0deg)' }}>▶</span>
-                              <span className="text-[10px] text-zinc-500 font-semibold">FILE HEADER</span>
-                              <span className="text-[9px] text-zinc-700 ml-auto">{metaLineIndices.length} lines</span>
+                              <span className="text-[10px] text-zinc-500 transition-transform duration-200 shrink-0" style={{ transform: showMeta ? 'rotate(90deg)' : 'rotate(0deg)' }}>▶</span>
+                              <span className="text-[10px] text-zinc-400 font-semibold shrink-0">FILE HEADER</span>
+                              <span className="text-[9px] text-zinc-500 shrink-0 ml-auto">{metaLineIndices.length} lines</span>
                             </div>
                           )}
 
