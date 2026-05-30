@@ -6,7 +6,7 @@ import { GoogleGenAI, Type } from "@google/genai";
 import dotenv from "dotenv";
 import fs from "fs";
 import { ProxyAgent, setGlobalDispatcher, Agent } from "undici";
-import { SSEEvent, SecurityAudit, CorrectnessAudit, DependencyAudit, EngineeringScore, ChangeImpact } from "./src/types.js";
+import { SSEEvent, SecurityAudit, CorrectnessAudit, DependencyAudit, EngineeringScore } from "./src/types.js";
 import { getPhase1SystemInstruction, getPhase1UserPrompt, getSecurityPrompt, getCorrectnessPrompt, getDependencyPrompt, getEngineeringPrompts, buildPhase2UserPrompt } from "./server/prompts.js";
 import { inferSecurityFromDiff, inferCorrectnessFromDiff, inferDependencyFromDiff, inferMaintainabilityFromDiff, inferArchitectureFromDiff, inferPerformanceFromDiff, inferRobustnessFromDiff, inferImpactFromDiff, inferTestQualityFromDiff } from "./server/fallback.js";
 
