@@ -149,7 +149,7 @@ export default function App() {
   const [pastedDiff, setPastedDiff] = useState("");
   const [loading, setLoading] = useState(false);
   const [loadingStep, setLoadingStep] = useState("");
-  const [reviewResult, setReviewResult] = useState<PrReviewResult>(MOCK_REVIEW_RESULT);
+const [reviewResult, setReviewResult] = useState<PrReviewResult | null>(null);
   const [errorMessage, setErrorMessage] = useState("");
   const [selectedModel, setSelectedModel] = useState<AiModel>('deepseek');
   
