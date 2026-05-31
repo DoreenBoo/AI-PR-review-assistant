@@ -1,20 +1,46 @@
-<div align="center">
-<img width="1200" height="475" alt="GHBanner" src="https://ai.google.dev/static/site-assets/images/share-ais-513315318.png" />
-</div>
+# 🚀 AI-PR-Review-Assistant | AI 智能代码审计助手
 
-# Run and deploy your AI Studio app
+> 基于 **DeepSeek-V3** 大模型驱动的生产级全栈自动化代码评审与安全审计平台。系统采用独创的**双阶段分析管线**，实现从远程 Git Diff 异步抓取、多维度质量加权评估，到行级漏洞深度诊断与代码闭环重写的全链路生态。
 
-This contains everything you need to run your app locally.
+---
 
-View your app in AI Studio: https://ai.studio/apps/ab17d220-5dec-417a-be5e-6e0606a0ed05
+## 🎬 Demo 演示视频 (答辩核心看点)
 
-## Run Locally
+如果您想快速了解本系统的核心功能、高保真 UI 交互及真实审计效果，请优先点击下方链接观看我们的功能演示视频：
 
-**Prerequisites:**  Node.js
+📌 **[Bilibili 官方演示视频入口](https://www.bilibili.com/video/BV1GKVS68EYa/)** *(视频包含：GitHub PR 一键拉取、双阶段大模型审计管线、行级漏洞修复方案、以及高拟真 Failover 容错降级演示)*
 
+---
 
-1. Install dependencies:
-   `npm install`
-2. Set the `GEMINI_API_KEY` in [.env.local](.env.local) to your Gemini API key
-3. Run the app:
-   `npm run dev`
+## ✨ 核心核心模块与特性
+
+### 1. 🌐 异步网络层与远程 Git 深度集成
+* **免授权抓取网关**：系统后端采用轻量级异步网络架构，支持一键粘贴 GitHub PR 链接，秒级拉取远程 Unified Diff 变更文本。
+* **多文件标签化分类**：前端自动解析 Diff 树，将受影响的文件进行标签化隔离渲染，并高亮标记缺陷密度。
+
+### 2. 🧠 独创的双阶段分析管线 (Phase 1 & Phase 2)
+* **Phase 1：业务语义分析 (Business Intent)**
+  AI 拒绝盲目扫描，而是 Step-by-Step 优先推断技术动作、划分系统模块，自动提炼出精准的**中文业务意图**，让审计具备全局视野。
+* **Phase 2：强约束质量审计**
+  通过前后端锁定的 Schema 结构化输出，聚焦**安全性、可读性、性能、容错性**四大维度进行加权评分，直观量化代码质量。
+
+### 3. 🛠️ 行级智能诊断与代码重写闭环
+* **微观架构诊断**：诊断精确到**具体文件和具体行号**，以交互式卡片形式深度剖析潜在隐患（如 V8 引擎去优化行为、未使用的泛型参数等）。
+* **SUGGESTED REWRITE (修复方案)**：当场输出高可读性的修复补丁，支持一键复制代码（COPY CODE）与标记执行修复，打造“诊断-重写”的无缝闭环。
+
+### 4. 🛡️ 工业级 Failover 容错降级架构
+* **高拟真兜底保障**：考虑到网络抖动、海外大模型接口限流等极端不可抗力，后端路由设计了高拟真容错降级机制。一旦异常，在 **0.1 秒内自动捕获并无缝触发降级大屏**，确保系统在任何高并发、突发演示场景下的 100% 流畅可用。
+
+---
+
+## 🛠️ 技术栈架构
+
+| 层次 | 核心技术选型 | 说明 |
+| :--- | :--- | :--- |
+| **前端 Frontend** | React / TypeScript / Vite / Tailwind CSS | 保证高保真、纯净的响应式状态机渲染与流畅动画 |
+| **后端 Backend** | Node.js / TypeScript / pnpm | 轻量级异步 I/O 网络层，高效处理高并发请求 |
+| **大模型层 AI** | DeepSeek-V3 / 强约束 JSON Schema | 提供高精度、语义化的双阶段专业审计产出 |
+| **进程管理** | PM2 | 生产环境常驻守护与零秒重启 |
+
+---
+
