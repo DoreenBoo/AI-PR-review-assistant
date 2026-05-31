@@ -1,3 +1,5 @@
+export type AiModel = 'deepseek' | 'gemini';
+
 export interface ReviewScore {
   security: number;
   readability: number;

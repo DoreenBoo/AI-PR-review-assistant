@@ -1,4 +1,4 @@
-# PR 变更智能解析功能设计
+# PR 智能解析功能设计
 
 ## 一、目标
 
@@ -11,12 +11,12 @@
 
 ## 二、技术决策
 
-| 决策点 | 选择 | 理由 |
-|--------|------|------|
-| 代码结构分析 | 正则模式匹配 | 轻量无额外依赖，覆盖 JS/TS 常见模式 |
-| GitHub API 认证 | 可选 GITHUB_TOKEN | 有 Token 提速率，无 Token 也能跑公开仓库 |
-| 架构集成 | 增强主端点 + 独立辅助端点 | `/api/review` 内嵌元数据/代码块/语义；独立 `/api/pr/metadata` 供按需调用 |
-| 前端范围 | 元数据面板 + 代码块标记 | 变更拓扑图后续迭代 |
+| 决策点           | 选择               | 理由                                                     |
+| ------------- | ---------------- | ------------------------------------------------------ |
+| 代码结构分析        | 正则模式匹配           | 轻量无额外依赖，覆盖 JS/TS 常见模式                                  |
+| GitHub API 认证 | 可选 GITHUB\_TOKEN | 有 Token 提速率，无 Token 也能跑公开仓库                            |
+| 架构集成          | 增强主端点 + 独立辅助端点   | `/api/review` 内嵌元数据/代码块/语义；独立 `/api/pr/metadata` 供按需调用 |
+| 前端范围          | 元数据面板 + 代码块标记    | 变更拓扑图后续迭代                                              |
 
 ## 三、架构
 
@@ -111,6 +111,7 @@ app.post("/api/pr/metadata", async (req, res) => {
 **函数**: `detectCodeBlocks(diffText)` → `CodeBlock[]`
 
 正则匹配模式：
+
 - `function foo()` / `async function foo()`
 - 类方法简写 `foo() {`
 - 箭头函数 `const foo = () =>`
@@ -143,18 +144,19 @@ riskLevel: { type: Type.STRING, description: "low | medium | high" },
 ### 6.2 代码块边界标记
 
 在 diff 行渲染中，命中 `codeBlocks` 时追加小标记：
+
 - `ƒ 函数名`（蓝色，function）
 - `C 类名`（蓝色，class）
 - `I 接口名`（蓝色，interface）
 
 ## 七、修改文件清单
 
-| 文件 | 修改内容 |
-|------|----------|
-| `src/types.ts` | 新增 PrMetadata, CodeBlock, PrSemantics；PrReviewResult 追加可选字段 |
-| `server.ts` | 新增 fetchPrMetadata(), detectCodeBlocks(), POST /api/pr/metadata；/api/review 内嵌元数据+代码块+语义 |
-| `src/App.tsx` | 新增 MetadataPanel 渲染区；diff 行渲染增加代码块标记 |
-| `.env.example` | 追加 GITHUB_TOKEN 说明 |
+| 文件             | 修改内容                                                                                     |
+| -------------- | ---------------------------------------------------------------------------------------- |
+| `src/types.ts` | 新增 PrMetadata, CodeBlock, PrSemantics；PrReviewResult 追加可选字段                              |
+| `server.ts`    | 新增 fetchPrMetadata(), detectCodeBlocks(), POST /api/pr/metadata；/api/review 内嵌元数据+代码块+语义 |
+| `src/App.tsx`  | 新增 MetadataPanel 渲染区；diff 行渲染增加代码块标记                                                     |
+| `.env.example` | 追加 GITHUB\_TOKEN 说明                                                                      |
 
 无需新增文件，全部在现有文件中扩展。
 
@@ -164,3 +166,4 @@ riskLevel: { type: Type.STRING, description: "low | medium | high" },
 - 正则匹配无命中 → codeBlocks 为空数组
 - Gemini 未输出语义字段 → normalizeReviewResult 提供默认值
 - 所有新增功能为可选叠加，不影响现有核心审计流程
+
