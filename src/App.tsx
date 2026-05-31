@@ -1,7 +1,6 @@
-import React, { useState, useMemo, useRef, useCallback } from "react";
+import React, { useState, useMemo, useRef } from "react";
 import { 
-  motion, 
-  AnimatePresence 
+  motion
 } from "motion/react";
 import { 
   ShieldAlert, 
@@ -27,100 +26,104 @@ import {
   Sliders,
   FileText
 } from "lucide-react";
-import { PrReviewResult, ReviewComment, AiModel } from "./types";
+import { ReviewComment, AiModel, AuditLevel } from "./types";
 import RadarChart from "./components/RadarChart";
-import { SecurityCard, CorrectnessCard, DependencyCard, EngineeringScoreCard, ImpactBar, SkeletonCard, LevelBadge } from "./components/DimensionCards";
+import { SecurityCard, CorrectnessCard, DependencyCard, EngineeringScoreCard, SkeletonCard, LevelBadge } from "./components/DimensionCards";
 import { useSSEReview } from "./hooks/useSSEReview";
 
 // ==========================================
 // PRESET MOCK DATA FOR DEMO PURPOSES
 // ==========================================
-const MOCK_REVIEW_RESULT: PrReviewResult = {
-  summary: "本次更改主要在认证模块引入了用户凭证检索，并尝试添加了一套高频运行的心跳和分析组件以支持监控。但由于多处拼接传值和定时器内存泄露，导致整体代码质量评分下滑较大。",
-  badge: "安全&架构重构",
-  overallScore: 48,
-  scores: {
-    security: 35,
-    readability: 65,
-    performance: 70,
-    robustness: 45
+
+// ==========================================
+// DEMO REVIEW STATE — FULL 9-DIMENSION RADAR DATA
+// ==========================================
+const DEMO_SSE_STATE = {
+  semantics: {
+    intent: "修复登录模块SQL注入漏洞并新增用户行为追踪与监控组件",
+    impactScope: ["用户认证模块", "JWT令牌签发", "数据分析引擎", "系统监控"],
+    riskLevel: "high" as const,
   },
+  security: {
+    level: "critical" as const,
+    score: 35,
+    vulnerabilities: [
+      { category: "sql_injection", description: "用户输入直接拼接到SQL查询，未使用参数化绑定", filePath: "src/auth.ts", lineNumber: 13, severity: "high" as const },
+      { category: "hardcoded_secret", description: "JWT签名密钥硬编码在源码中，任何获取代码者均可伪造令牌", filePath: "src/auth.ts", lineNumber: 19, severity: "high" as const },
+    ],
+    _inferred: false,
+    _source: "deep" as const,
+  },
+  correctness: {
+    level: "warning" as const,
+    score: 65,
+    concerns: [
+      { type: "null_safety" as const, description: "findUserByCredentials 未处理数据库返回空结果的情况", filePath: "src/auth.ts", lineNumber: 15 },
+      { type: "boundary_gap" as const, description: "sendAnalytics 未校验数据字段长度，可能引发OOM", filePath: "src/utils/tracker.ts", lineNumber: 22 },
+    ],
+    _inferred: false,
+    _source: "deep" as const,
+  },
+  dependency: {
+    level: "warning" as const,
+    score: 70,
+    outdatedDeps: [{ name: "jsonwebtoken", currentVersion: "8.5.1", latestVersion: "9.0.2", risk: "存在已知CVE-2022-23529，建议立即升级" }],
+    licenseIssues: [],
+    _inferred: false,
+    _source: "deep" as const,
+  },
+  maintainability: { score: 60, highlights: ["函数命名清晰表达意图", "认证逻辑封装良好"], suggestions: ["tracker.ts 中 UserTracker 类职责过多，建议拆分", "多处使用魔法数字（5000、3600000）应提取为常量"], _inferred: false, _source: "deep" as const },
+  architecture: { score: 80, highlights: ["新增模块遵循现有分层架构", "Tracker 通过构造函数注入，解耦良好"], suggestions: ["tracker 模块建议改为接口抽象，方便后续替换存储后端"], _inferred: false, _source: "deep" as const },
+  performance: { score: 75, highlights: ["数据库查询使用了 LIMIT 1 限制返回行数"], suggestions: ["setInterval 5秒心跳频率偏高，建议调整为30秒", "sendAnalytics 每次全量发送，建议改为增量上报"], _inferred: false, _source: "deep" as const },
+  robustness: { score: 40, highlights: [], suggestions: ["setInterval 未存储句柄，无法在组件销毁时清除——存在内存泄漏", "generateSessionToken 未校验 userId 参数有效性", "缺少对数据库连接失败的异常处理与重试逻辑", "sendAnalytics 无超时保护，网络异常时可能永久阻塞"], _inferred: false, _source: "deep" as const },
+  testQuality: { score: 50, highlights: [], suggestions: ["本次变更未包含任何测试代码", "SQL注入修复后缺少对应的安全回归测试用例", "建议为 UserTracker 的生命周期管理增加单元测试"], _inferred: false, _source: "deep" as const },
+  impact: {
+    level: "high" as const,
+    affectedModules: ["用户认证", "JWT令牌签发", "数据追踪", "系统监控"],
+    publicApiChanges: false,
+    dataModelChanges: true,
+    crossModuleDeps: ["auth → tracker"],
+    _inferred: false,
+    _source: "deep" as const,
+  },
+  overallScore: 57,
+  overallLevel: "review" as const,
+  summary: "本次变更涉及认证安全修复和新增监控组件，但存在SQL注入和硬编码密钥等高危安全问题，且缺少相应测试覆盖。建议修复安全缺陷后重新提交审查。",
+  badge: "需复审",
   keyFindings: [
-    "在 src/auth.ts 中直接将外部传入的 username 进行字符串模版拼接并执行数据库查询，引发严重的高危 SQL 注入漏洞。",
-    "在 src/utils/tracker.ts 中，启动的 setInterval 循环定时器未进行句柄存储和清除逻辑，存在明显的长期物理内存泄露。",
-    "在 JWT 签名部分将加密私钥或强签名信息直接硬编码写死，极易在团队共享或仓库被下载时发生核心秘钥泄露事故。"
+    "src/auth.ts 中发现SQL注入漏洞：用户输入直接拼接进数据库查询，未使用参数化绑定",
+    "src/auth.ts 中JWT签名密钥硬编码在源码中，存在核心凭证泄露风险",
+    "src/utils/tracker.ts 中 setInterval 未管理生命周期句柄，长时间运行将导致内存泄漏",
   ],
-  comments: [
-    {
-      id: "cmt_1",
-      filePath: "src/auth.ts",
-      lineNumber: 13,
-      originalContent: "  const query = `SELECT * FROM users WHERE username = '${username}' AND password_hash = '${passwordHash}' LIMIT 1`;",
-      description: "【高危 SQL 注入漏洞】接收用户输入的 username 与 passwordHash 未做任何校验且没有采用参数化机制，直接采取拼装模版。攻击者只要传入类似 `' OR '1'='1` 的载荷即可突破检验，或者直接对数据库进行恶意爆破与泄库操作。",
-      suggestion: "```typescript\n// 推荐：采用安全参数化绑定查询，彻底防御 SQL 注入！ 🛡️\nconst query = 'SELECT * FROM users WHERE username = ? AND password_hash = ? LIMIT 1';\nconst result = await db.query(query, [username, passwordHash]);\n```",
-      severity: "high"
-    },
-    {
-      id: "cmt_2",
-      filePath: "src/auth.ts",
-      lineNumber: 19,
-      originalContent: "  return jwt.sign({ userId, expiry }, \"default_insecure_key_123\");",
-      description: "【严重配置安全缺陷】禁止在代码文件甚至开发阶段直接硬编码敏感的私钥（如 `default_insecure_key_123`）。这属于高危的安全审计项，任何掌握该文件的人都能随心所欲伪造用户令牌。",
-      suggestion: "```typescript\n// 从环境变量中安全提取密钥，并增加容错保护机制\nconst jwtSecret = process.env.JWT_SECRET;\nif (!jwtSecret) {\n  throw new Error('SYSTEM ERROR: Required environmental variable JWT_SECRET is undefined!');\n}\nreturn jwt.sign({ userId, expiry }, jwtSecret);\n```",
-      severity: "high"
-    },
-    {
-      id: "cmt_3",
-      filePath: "src/utils/tracker.ts",
-      lineNumber: 12,
-      originalContent: "    setInterval(() => {",
-      description: "【中度内存泄漏隐患】无副作用声明且无注销机制的 `setInterval` 定时器。每实例化一个 `UserTracker` 都会在全局环境常驻一个不断打印的计时事件。如果没有在析构或手动调用时执行 `clearInterval`，长此以往将常驻并耗尽系统 Node 堆空间。",
-      suggestion: "```typescript\n// 增加生命周期控制方法，储存定时器句柄，并在不需要时主动销毁\nexport class UserTracker {\n  private heartbeatTimer: NodeJS.Timeout | null = null;\n\n  startHeartbeat() {\n    this.heartbeatTimer = setInterval(() => {\n      console.log(\"Tracking active session statistics...\");\n      this.sendAnalytics();\n    }, 5000);\n  }\n\n  destroy() {\n    if (this.heartbeatTimer) {\n      clearInterval(this.heartbeatTimer);\n    }\n  }\n}\n```",
-      severity: "medium"
-    }
-  ],
-  diff: `diff --git a/src/auth.ts b/src/auth.ts
+  comments: [] as ReviewComment[],
+  rawDiff: `diff --git a/src/auth.ts b/src/auth.ts
 index b838f32..cbdac44 100644
 --- a/src/auth.ts
 +++ b/src/auth.ts
-@@ -10,12 +10,18 @@ export async function findUserByCredentials(username: string, passwordHash: stri
--  // TODO: Implement secure database checks
+@@ -10,12 +10,18 @@
 -  return null;
-+  console.log(\`Authenticating user: \${username}\default_insecure_key_123\`);
 +  const query = \`SELECT * FROM users WHERE username = '\${username}' AND password_hash = '\${passwordHash}' LIMIT 1\`;
 +  const result = await db.executeRaw(query);
 +  return result[0];
- }
- 
- export function generateSessionToken(userId: string): string {
-   const expiry = new Date(Date.now() + 3600000);
 -  return jwt.sign({ userId, expiry }, process.env.JWT_SECRET!);
 +  return jwt.sign({ userId, expiry }, "default_insecure_key_123");
- }
 diff --git a/src/utils/tracker.ts b/src/utils/tracker.ts
-index c6b9e31..fd821ac 100644
+index 9f32ab1..d4e5f6a 100644
 --- a/src/utils/tracker.ts
 +++ b/src/utils/tracker.ts
-@@ -1,15 +1,19 @@
+@@ -1,5 +1,12 @@
  export class UserTracker {
-   private activeTimers: any[] = [];
- 
-   constructor() {
-     this.startHeartbeat();
-   }
- 
-   startHeartbeat() {
--    const handle = setInterval(() => {
--      this.sendAnalytics();
--    }, 5000);
--    this.activeTimers.push(handle);
++  constructor() {
 +    setInterval(() => {
 +      console.log("Tracking active session statistics...");
 +      this.sendAnalytics();
 +    }, 5000);
    }
  
-   sendAnalytics() {`
+   sendAnalytics() {`,
+  loading: false,
+  progressMessage: "演示数据已加载",
+  error: null as string | null,
 };
 
 function decodeGitOctalEscapes(diffText: string): string {
@@ -150,11 +153,9 @@ function decodeGitOctalEscapes(diffText: string): string {
 export default function App() {
   const [prUrl, setPrUrl] = useState("");
   const [pastedDiff, setPastedDiff] = useState("");
-  const [loading, setLoading] = useState(false);
-  const [loadingStep, setLoadingStep] = useState("");
-  const [reviewResult, setReviewResult] = useState<PrReviewResult>(MOCK_REVIEW_RESULT);
   const [errorMessage, setErrorMessage] = useState("");
   const [selectedModel, setSelectedModel] = useState<AiModel>('deepseek');
+  const [demoMode, setDemoMode] = useState(false);
   
   // Custom checklist representing resolved issues
   const [resolvedIssues, setResolvedIssues] = useState<Record<string, boolean>>({});
@@ -163,13 +164,43 @@ export default function App() {
   const [expandedHeaders, setExpandedHeaders] = useState<Record<string, boolean>>({});
   const [showFileDropdown, setShowFileDropdown] = useState(false);
   const fileTabsRef = useRef<HTMLDivElement>(null);
+  const leftSidebarRef = useRef<HTMLElement>(null);
   const [highlightedDimension, setHighlightedDimension] = useState<string | null>(null);
   const [expandedDimension, setExpandedDimension] = useState<string | null>(null);
   const { startReview: startSSEReview, cancelReview, ...reviewState } = useSSEReview();
 
+  // Active radar dashboard state: SSE stream > demo > null
+  const activeState = (reviewState.loading || reviewState.semantics)
+    ? reviewState
+    : demoMode
+      ? DEMO_SSE_STATE
+      : null;
+
+  // Unified comments from both SSE reviews and legacy POST reviews
+  const allComments = useMemo(() => {
+    return activeState?.comments || [];
+  }, [activeState?.comments]);
+
+  // Per-file risk aggregation: fileName → { highest, count, high, medium, low }
+  const fileRiskMap = useMemo(() => {
+    const map: Record<string, { high: number; medium: number; low: number; total: number; highest: 'high' | 'medium' | 'low' | null }> = {};
+    for (const c of allComments) {
+      const f = map[c.filePath] || { high: 0, medium: 0, low: 0, total: 0, highest: null };
+      f.total++;
+      if (c.severity === 'high') f.high++;
+      else if (c.severity === 'medium') f.medium++;
+      else f.low++;
+      if (!f.highest || (c.severity === 'high') || (c.severity === 'medium' && f.highest === 'low')) {
+        f.highest = c.severity;
+      }
+      map[c.filePath] = f;
+    }
+    return map;
+  }, [allComments]);
+
   // Parse the Unified Patch / Diff
   const parsedFiles = useMemo(() => {
-    const diffText = decodeGitOctalEscapes(reviewResult?.diff || "");
+    const diffText = decodeGitOctalEscapes(activeState?.rawDiff || pastedDiff || "");
     const filesList: {
       fileName: string;
       lines: {
@@ -232,19 +263,19 @@ export default function App() {
     }
 
     return filesList;
-  }, [reviewResult]);
+  }, [reviewState.rawDiff, pastedDiff]);
 
   // Set the default selected file on result load/change
   useMemo(() => {
     if (parsedFiles.length > 0) {
       const withComments = parsedFiles.find(f => 
-        (reviewResult?.comments || []).some(c => c.filePath === f.fileName)
+        (allComments).some(c => c.filePath === f.fileName)
       );
       setSelectedFile(withComments ? withComments.fileName : parsedFiles[0].fileName);
     } else {
       setSelectedFile("");
     }
-  }, [parsedFiles, reviewResult]);
+  }, [parsedFiles]);
 
   // Copy support for code snippets
   const copyToClipboard = (text: string, id: string) => {
@@ -253,55 +284,6 @@ export default function App() {
       setCopiedCodeId(id);
       setTimeout(() => setCopiedCodeId(null), 2000);
     });
-  };
-
-  const handleStartReview = async (e: React.FormEvent) => {
-    e.preventDefault();
-    if (!prUrl && !pastedDiff) {
-      setErrorMessage("请输入合法的 GitHub PR URL 或粘贴 Unified Diff 文本内容");
-      return;
-    }
-
-    setLoading(true);
-    setErrorMessage("");
-    setLoadingStep("正在解构及提取 Pull Request 代码变更...");
-
-    try {
-      setTimeout(() => {
-        setLoadingStep(`正在触发 ${selectedModel === 'deepseek' ? 'DeepSeek-V4-Pro' : 'Gemini 3.5-flash'} AI 审计引擎进行安全性静态扫描...`);
-      }, 1000);
-
-      setTimeout(() => {
-        setLoadingStep("正在生成代码重构优化建议与维度加权评分...");
-      }, 2500);
-
-      const response = await fetch("/api/review", {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({
-          url: prUrl,
-          diff: pastedDiff || null,
-          model: selectedModel,
-        }),
-      });
-
-      const data = await response.json();
-      if (!response.ok) {
-        throw new Error(data.error || "发生了未预期的服务器处理异常。");
-      }
-
-      setReviewResult(data);
-      setResolvedIssues({});
-    } catch (err: any) {
-      console.error(err);
-      setErrorMessage(
-        err.message || 
-        "无法调用大模型审计。这可能是因为无网络连接或未在 Settings 中正确设置 GEMINI_API_KEY。"
-      );
-    } finally {
-      setLoading(false);
-      setLoadingStep("");
-    }
   };
 
   const handleSSEReview = (e: React.FormEvent) => {
@@ -315,16 +297,18 @@ export default function App() {
   };
 
   const loadDemoDiff = () => {
+    setDemoMode(true);
     setPrUrl("https://github.com/developer/sec-demo-app/pull/15");
-    setPastedDiff(MOCK_REVIEW_RESULT.diff);
-    setReviewResult(MOCK_REVIEW_RESULT);
-    setResolvedIssues({});
+    setPastedDiff(DEMO_SSE_STATE.rawDiff);
+setResolvedIssues({});
     setErrorMessage("");
+    setHighlightedDimension(null);
+    setExpandedDimension(null);
   };
 
   // Compute severity distribution
   const statistics = useMemo(() => {
-    const comments = reviewResult?.comments || [];
+    const comments = allComments;
     const result = {
       high: 0,
       medium: 0,
@@ -336,7 +320,7 @@ export default function App() {
       else if (c.severity === "low") result.low++;
     });
     return result;
-  }, [reviewResult]);
+  }, [allComments]);
 
   const toggleIssueResolution = (id: string) => {
     setResolvedIssues(prev => ({ ...prev, [id]: !prev[id] }));
@@ -347,6 +331,89 @@ export default function App() {
     if (score >= 60) return "text-amber-400";
     return "text-rose-500";
   };
+
+  const renderInputForm = () => (
+    <form onSubmit={handleSSEReview} className="flex flex-col gap-4">
+      <div className="flex flex-col gap-1.5">
+        <label className="text-[10px] text-zinc-500 uppercase tracking-wider font-bold">GitHub PR URL</label>
+        <div className="relative">
+          <Github className="absolute left-3 top-1/2 -translate-y-1/2 w-4 h-4 text-zinc-600" />
+          <input
+            type="text"
+            value={prUrl}
+            onChange={(e) => setPrUrl(e.target.value)}
+            placeholder="https://github.com/owner/repo/pull/123"
+            className="w-full bg-zinc-950 border border-zinc-800 rounded-lg pl-10 pr-4 py-2.5 text-xs text-white placeholder-zinc-600 font-mono focus:outline-none focus:border-emerald-500/60 transition-colors"
+          />
+        </div>
+      </div>
+      <div className="flex items-center gap-3">
+        <div className="flex-1 h-px bg-zinc-800" />
+        <span className="text-[10px] text-zinc-600 font-mono">或直接粘贴 Diff</span>
+        <div className="flex-1 h-px bg-zinc-800" />
+      </div>
+      <div className="flex flex-col gap-1.5">
+        <textarea
+          value={pastedDiff}
+          onChange={(e) => setPastedDiff(e.target.value)}
+          placeholder="diff --git a/src/index.ts b/src/index.ts&#10;index 83db48f..bf374d8 100644&#10;--- a/src/index.ts&#10;+++ b/src/index.ts&#10;@@ -1,5 +1,6 @@&#10; ..."
+          rows={5}
+          className="w-full bg-zinc-950 border border-zinc-800 rounded-lg px-4 py-2.5 text-[11px] text-white placeholder-zinc-600 font-mono resize-none focus:outline-none focus:border-emerald-500/60 transition-colors"
+        />
+      </div>
+      <div className="flex items-center gap-3 flex-wrap">
+        <div className="flex items-center gap-2">
+          <label className="text-[10px] text-zinc-500 uppercase tracking-wider font-bold">模型</label>
+          <select
+            value={selectedModel}
+            onChange={(e) => setSelectedModel(e.target.value as AiModel)}
+            className="bg-zinc-950 border border-zinc-800 rounded-md px-3 py-1.5 text-[11px] text-zinc-300 font-mono focus:outline-none focus:border-emerald-500/60 cursor-pointer"
+          >
+            <option value="deepseek">DeepSeek-V4-Pro</option>
+            <option value="gemini">Gemini 3.5-Flash</option>
+          </select>
+        </div>
+        <div className="flex-1" />
+        <button
+          type="submit"
+          className="flex items-center gap-2 px-5 py-2 bg-emerald-600 hover:bg-emerald-500 rounded-lg text-xs font-bold text-white transition cursor-pointer shadow-lg shadow-emerald-500/20"
+        >
+          <Play className="w-3.5 h-3.5" />
+          开始审查
+        </button>
+      </div>
+    </form>
+  );
+
+  const renderInputCompact = () => (
+    <form onSubmit={handleSSEReview} className="flex items-center gap-3 flex-1 min-w-0">
+      <div className="relative flex-1 min-w-0">
+        <Github className="absolute left-2.5 top-1/2 -translate-y-1/2 w-3.5 h-3.5 text-zinc-600" />
+        <input
+          type="text"
+          value={prUrl}
+          onChange={(e) => setPrUrl(e.target.value)}
+          placeholder="GitHub PR URL..."
+          className="w-full bg-zinc-950 border border-zinc-800 rounded-md pl-8 pr-3 py-1.5 text-[11px] text-white placeholder-zinc-600 font-mono focus:outline-none focus:border-emerald-500/60 transition-colors"
+        />
+      </div>
+      <select
+        value={selectedModel}
+        onChange={(e) => setSelectedModel(e.target.value as AiModel)}
+        className="bg-zinc-950 border border-zinc-800 rounded-md px-2 py-1.5 text-[10px] text-zinc-400 font-mono focus:outline-none focus:border-emerald-500/60 cursor-pointer shrink-0"
+      >
+        <option value="deepseek">DeepSeek-V4</option>
+        <option value="gemini">Gemini-3.5</option>
+      </select>
+      <button
+        type="submit"
+        className="flex items-center gap-1.5 px-3 py-1.5 bg-emerald-600 hover:bg-emerald-500 rounded-md text-[10px] font-bold text-white transition cursor-pointer shrink-0"
+      >
+        <Play className="w-3 h-3" />
+        审查
+      </button>
+    </form>
+  );
 
   return (
     <div className="min-h-screen bg-zinc-950 text-zinc-300 flex flex-col font-mono" id="app_root">
@@ -364,16 +431,8 @@ export default function App() {
         </div>
 
 
-
         <div className="flex items-center gap-3">
-          <button 
-            onClick={loadDemoDiff}
-            className="hidden md:flex items-center gap-1.5 px-3 py-1.5 rounded-md bg-zinc-900 border border-zinc-800 hover:border-zinc-700 hover:bg-zinc-850 text-[10px] text-zinc-400 font-bold transition cursor-pointer"
-          >
-            <Flame className="w-3.5 h-3.5 text-amber-500" />
-            演示示例
-          </button>
-
+          
           
         </div>
       </header>
@@ -394,751 +453,501 @@ export default function App() {
       {/* MAIN LAYOUT */}
       <main className="flex-1 max-w-7xl w-full mx-auto p-4 md:p-6 flex flex-col gap-6">
         
-        {/* INPUT SOURCE SECTION WITH ADVANCED MODERN TECH CODE ACCENTS */}
-        <section className="bg-zinc-900/30 border border-zinc-800 rounded-xl p-5 relative overflow-hidden">
-          <div className="absolute top-0 right-0 p-3 select-none">
-            <span className="text-[9px] bg-zinc-800/80 px-2 py-0.5 rounded text-zinc-500 font-bold border border-zinc-800">01 / SOURCE_CONFIG</span>
-          </div>
+        {/* ==========================================
+            LANDING PAGE — when no review or demo is active
+            ========================================== */}
+        {!activeState && (
+          <motion.div
+            initial={{ opacity: 0 }}
+            animate={{ opacity: 1 }}
+            className="flex flex-col items-center gap-6"
+          >
+            {/* HERO: Radar chart + title */}
+            <div className="w-full flex flex-col lg:flex-row items-center gap-8 lg:gap-16 py-6 lg:py-10">
+              {/* Left: Radar chart hero */}
+              <motion.div
+                initial={{ opacity: 0, scale: 0.9 }}
+                animate={{ opacity: 1, scale: 1 }}
+                transition={{ duration: 0.6, ease: "easeOut" }}
+                className="shrink-0"
+              >
+                <RadarChart
+                  security={null}
+                  correctness={null}
+                  dependency={null}
+                  maintainability={null}
+                  architecture={null}
+                  performance={null}
+                  robustness={null}
+                  testQuality={null}
+                  overallScore={null}
+                  highlightedDimension={null}
+                />
+              </motion.div>
 
-          <form onSubmit={handleSSEReview} className="space-y-4">
-            <div>
-              <div className="flex items-center gap-2 mb-2">
-                <Sliders className="w-4 h-4 text-emerald-400 shrink-0" />
-                <h2 className="text-xs font-bold text-white uppercase tracking-wider">
-                  配置审计变更源 / PULL REQUEST OR DIFF TEXT
-                </h2>
+              {/* Right: Title + tagline */}
+              <div className="flex-1 flex flex-col items-center lg:items-start text-center lg:text-left gap-5">
+                <motion.div
+                  initial={{ opacity: 0, y: 20 }}
+                  animate={{ opacity: 1, y: 0 }}
+                  transition={{ duration: 0.5, delay: 0.15 }}
+                >
+                  <h1 className="text-3xl lg:text-4xl font-black text-white tracking-tighter leading-none">
+                    AI PR Review
+                  </h1>
+                  <p className="text-sm lg:text-base text-zinc-400 mt-2 font-sans tracking-wide">
+                    9 维度代码质量雷达评估
+                  </p>
+                </motion.div>
+
+                <motion.p
+                  initial={{ opacity: 0, y: 20 }}
+                  animate={{ opacity: 1, y: 0 }}
+                  transition={{ duration: 0.5, delay: 0.25 }}
+                  className="text-xs lg:text-sm text-zinc-500 max-w-md leading-relaxed font-sans"
+                >
+                  覆盖安全漏洞、功能正确性、依赖风险、可维护性、架构设计、性能、容错健壮性、测试质量
+                  及变更影响评估。通过 <span className="text-emerald-400 font-bold">快速总览 + 深度推理</span> 两段式流水线，最快 25 秒呈现完整质量面板。
+                </motion.p>
+
+                <motion.div
+                  initial={{ opacity: 0, y: 20 }}
+                  animate={{ opacity: 1, y: 0 }}
+                  transition={{ duration: 0.5, delay: 0.35 }}
+                  className="flex items-center gap-3"
+                >
+                  <div className="flex items-center gap-1.5">
+                    {["安全", "正确性", "依赖", "可维护", "架构", "性能", "容错", "测试"].map((label, i) => (
+                      <div
+                        key={label}
+                        className="w-2 h-2 rounded-full"
+                        style={{
+                          background: `hsl(${i * 45}, 60%, ${50 + i * 3}%)`,
+                          opacity: 0.7,
+                        }}
+                      />
+                    ))}
+                  </div>
+                  <span className="text-[10px] text-zinc-600 font-mono">8 DIMENSIONS ACTIVE</span>
+                </motion.div>
+
+                <motion.div
+                  initial={{ opacity: 0, y: 20 }}
+                  animate={{ opacity: 1, y: 0 }}
+                  transition={{ duration: 0.5, delay: 0.45 }}
+                />
               </div>
-              <p className="text-[11px] text-zinc-500 max-w-3xl mb-3 leading-relaxed">
-                本平台支持深度自动化扫描。粘贴公开的 GitHub PR 地址（例如: <code className="text-zinc-400 bg-zinc-950 px-1 py-0.5 rounded">https://github.com/owner/repo/pull/1</code>），或在下方文本区直接贴入 Git 终端输出的 <code className="text-zinc-400 bg-zinc-950 px-1 py-0.5 rounded">git diff</code> 字符。
-              </p>
             </div>
 
-            <div className="grid grid-cols-1 gap-4">
-              {!pastedDiff && (
-                <div>
-                  <div className="flex justify-between items-center mb-1.5">
-                    <label className="flex items-center gap-1.5 text-[10px] text-zinc-500 font-bold uppercase tracking-wider">
-                      GitHub Pull Request 网址 (PUBLIC REPOSITORY ONLY)
-                      <Github className={`w-3.5 h-3.5 transition-colors ${prUrl ? 'text-emerald-400' : 'text-zinc-600'}`} />
-                    </label>
-                    {prUrl && (
-                      <button 
-                        type="button" 
-                        onClick={() => setPrUrl("")}
-                        className="text-[10px] text-rose-400 hover:text-rose-300 font-bold underline cursor-pointer"
-                      >
-                        清空输入框
-                      </button>
-                    )}
-                  </div>
-                  <input
-                    type="url"
-                    value={prUrl}
-                    onChange={(e) => setPrUrl(e.target.value)}
-                    placeholder="例如: https://github.com/facebook/react/pull/24185"
-                    className="w-full bg-zinc-950 border border-zinc-800 hover:border-zinc-700 focus:border-emerald-500 focus:outline-none rounded px-4 py-2 text-xs font-mono text-zinc-200 placeholder-zinc-600 transition"
-                  />
-                </div>
-              )}
+            {/* INPUT FORM — below the hero */}
+            <motion.section
+              initial={{ opacity: 0, y: 20 }}
+              animate={{ opacity: 1, y: 0 }}
+              transition={{ duration: 0.5, delay: 0.5 }}
+              className="w-full max-w-2xl bg-zinc-900/30 border border-zinc-800 rounded-xl p-5 relative overflow-hidden"
+            >
+              <div className="absolute top-0 right-0 p-3 select-none">
+                <span className="text-[9px] bg-zinc-800/80 px-2 py-0.5 rounded text-zinc-500 font-bold border border-zinc-800">审查源配置</span>
+              </div>
+              {renderInputForm()}
+            </motion.section>
+          </motion.div>
+        )}
 
-              {!prUrl && (
-                <div>
-                  <div className="flex justify-between items-center mb-1.5 text-[10px]">
-                    <span className="flex items-center gap-1.5 text-zinc-500 font-bold uppercase tracking-wider">
-                      贴入 UNIFIED RAW PATCH / GIT DIFF TEXT
-                      <FileText className={`w-3.5 h-3.5 transition-colors ${pastedDiff ? 'text-emerald-400' : 'text-zinc-500'}`} />
-                    </span>
-                    {pastedDiff && (
-                      <button 
-                        type="button" 
-                        onClick={() => setPastedDiff("")}
-                        className="text-rose-400 hover:text-rose-300 font-bold underline cursor-pointer"
-                      >
-                        清空输入框
-                      </button>
-                    )}
-                  </div>
-                  <textarea
-                    value={pastedDiff}
-                    onChange={(e) => setPastedDiff(e.target.value)}
-                    rows={4}
-                    placeholder={`--- a/src/index.ts\n+++ b/src/index.ts\n@@ -2,3 +2,4 @@\n- console.log("old");\n+ console.log("new code changes");`}
-                    className="w-full block bg-zinc-950 border border-zinc-800 hover:border-zinc-700 focus:border-emerald-500 focus:outline-none p-4 rounded text-xs leading-relaxed text-zinc-200 font-mono placeholder-zinc-600 scrollbar-thin"
-                  />
-                </div>
-              )}
-            </div>
+        {/* ==========================================
+            DASHBOARD — when review or demo is active
+            ========================================== */}
+        {activeState && (
+          <motion.div
+            initial={{ opacity: 0 }}
+            animate={{ opacity: 1 }}
+            className="flex flex-col gap-6 flex-1 min-h-0"
+            id="review_results_block"
+          >
+            {/* Compact input bar when dashboard is active */}
+            <section className="bg-zinc-900/20 border border-zinc-800/60 rounded-lg px-4 py-3 flex items-center gap-4 flex-wrap">
+              <span className="text-[9px] text-zinc-500 uppercase tracking-wider font-bold shrink-0">审查源</span>
+              {renderInputCompact()}
+            </section>
 
-            {/* Error Message Panel */}
-            {errorMessage && (
-              <div className="p-4 rounded-md bg-rose-950/30 border border-rose-500/30 flex items-start gap-3 mt-2 text-xs text-rose-200 animate-headShake" id="error_alert">
-                <AlertCircle className="w-5 h-5 text-red-500 shrink-0 mt-0.5" />
-                <div>
-                  <strong className="font-semibold text-rose-400 block mb-1">AUDIT SYSTEM REPORTED AN ERROR:</strong>
-                  <p className="font-sans text-[11px] text-zinc-400">{errorMessage}</p>
-                </div>
+            {/* Progress indicator */}
+            {reviewState.loading && reviewState.progressMessage && (
+              <div className="bg-zinc-900/40 border border-emerald-500/20 rounded-lg px-4 py-2 flex items-center gap-2 text-xs">
+                <div className="w-2 h-2 bg-emerald-400 rounded-full animate-pulse" />
+                <span className="text-emerald-300/80 font-mono">{reviewState.progressMessage}</span>
               </div>
             )}
 
-            <div className="flex flex-col sm:flex-row justify-between items-start sm:items-center gap-4 pt-2 border-t border-zinc-900">
-              <span className="text-[10px] text-zinc-500 flex items-center gap-1">
-                <Sparkles className="w-3.5 h-3.5 text-amber-500" />
-                已准备安全探针: SQL-Injection, Node Process, Memory Leaks, Cryptography Hardcoding.
-              </span>
-              
-              <div className="flex items-center gap-3 w-full sm:w-auto justify-end">
-                <div className="flex items-center gap-2 relative">
-                  <label className="text-[10px] text-zinc-500 font-bold uppercase tracking-wider whitespace-nowrap">模型:</label>
-                  <div className="relative">
-                    <div className={`absolute -inset-[1px] rounded-md bg-gradient-to-r ${
-                      selectedModel === 'deepseek' ? 'from-blue-500/60 to-cyan-500/60' : 'from-amber-500/60 to-orange-500/60'
-                    } opacity-80 blur-[2px]`} />
-                    <select
-                      value={selectedModel}
-                      onChange={(e) => setSelectedModel(e.target.value as AiModel)}
-                      className="relative bg-zinc-950 border border-zinc-700 hover:border-zinc-500 focus:border-emerald-500 focus:outline-none rounded-md pl-8 pr-8 py-2 text-[11px] font-mono font-bold text-zinc-200 cursor-pointer transition appearance-none"
-                      style={{
-                        backgroundImage: `url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='14' height='14' viewBox='0 0 24 24' fill='none' stroke='%23a1a1aa' stroke-width='2.5' stroke-linecap='round' stroke-linejoin='round'%3E%3Cpolyline points='6 9 12 15 18 9'%3E%3C/polyline%3E%3C/svg%3E")`,
-                        backgroundRepeat: 'no-repeat',
-                        backgroundPosition: 'right 8px center',
-                      }}
-                    >
-                      <option value="deepseek">DeepSeek-V4-Pro</option>
-                      <option value="gemini">Gemini 3.5 Flash</option>
-                    </select>
-                    <span className={`absolute left-2.5 top-1/2 -translate-y-1/2 text-xs pointer-events-none ${
-                      selectedModel === 'deepseek' ? 'text-blue-400' : 'text-amber-400'
-                    }`}>
-                      {selectedModel === 'deepseek' ? '🔵' : '💎'}
-                    </span>
-                  </div>
-                </div>
-                <button
-                  type="submit"
-                  disabled={loading || reviewState.loading}
-                  className="bg-emerald-500 hover:bg-emerald-400 text-zinc-950 px-5 py-2 rounded font-bold text-xs flex items-center justify-center gap-2 transition duration-200 shadow-[0_0_15px_rgba(16,185,129,0.2)] disabled:opacity-50 disabled:pointer-events-none w-full sm:w-auto cursor-pointer"
-                >
-                  {loading || reviewState.loading ? (
-                      <>
-                        <div className="w-3 h-3 border-2 border-zinc-950 border-t-transparent rounded-full animate-spin" />
-                        <span>{reviewState.loading ? "SSE 流式分析中..." : "正在分析变更..."}</span>
-                      </>
-                  ) : (
-                    <>
-                      <Play className="w-3.5 h-3.5 fill-zinc-950" />
-                      <span>TRIGGER RE-ANALYZE / 执行安全审计</span>
-                    </>
-                  )}
-                </button>
+                        {/* Demo mode badge */}
+            {demoMode && !reviewState.loading && !reviewState.semantics && (
+              <div className="bg-amber-950/20 border border-amber-500/20 rounded-lg px-4 py-2 flex items-center gap-2 text-xs">
+                <Flame className="w-3.5 h-3.5 text-amber-400" />
+                <span className="text-amber-300/80 font-mono">当前显示演示数据 — 请粘贴 PR URL 或 Diff 文本启动真实审计</span>
               </div>
-            </div>
-          </form>
-        </section>
+            )}
 
-        {/* LOADING SCANNERS OVERLAY */}
-        <AnimatePresence>
-          {(loading || reviewState.loading) && (
-            <motion.div 
-              initial={{ opacity: 0, y: 5 }}
-              animate={{ opacity: 1, y: 0 }}
-              exit={{ opacity: 0 }}
-              className="bg-zinc-900/40 border border-emerald-500/30 p-8 rounded-xl flex flex-col items-center justify-center text-center gap-4 relative overflow-hidden"
-              id="loading_panel"
-            >
-              <div className="absolute top-0 left-0 right-0 h-[1.5px] bg-gradient-to-r from-transparent via-emerald-500 to-transparent animate-pulse" />
-              <div className="w-10 h-10 rounded-full border-2 border-zinc-800 border-t-emerald-400 animate-spin flex items-center justify-center">
-                <ShieldAlert className="w-4 h-4 text-emerald-400" />
+            {/* 2x2 GRID: Row1=Radar|Analysis Row2=Cards|Diff — rows align at bottom */}
+            <div className="grid grid-cols-1 lg:grid-cols-12 gap-6 flex-1 min-h-0" style={{ gridTemplateRows: 'auto minmax(0, 1fr)' }}>
+              
+              {/* ====== ROW 1 LEFT: Radar chart ====== */}
+              <div className="lg:col-span-4 flex justify-center">
+                <RadarChart
+                  security={activeState.security}
+                  correctness={activeState.correctness}
+                  dependency={activeState.dependency}
+                  maintainability={activeState.maintainability}
+                  architecture={activeState.architecture}
+                  performance={activeState.performance}
+                  robustness={activeState.robustness}
+                  testQuality={activeState.testQuality}
+                  overallScore={activeState.overallScore}
+                  highlightedDimension={highlightedDimension}
+                />
               </div>
-              <div className="max-w-md">
-                <span className="text-[9px] uppercase tracking-wider text-emerald-500 font-bold block mb-1">SYSTEM LEVEL LOG</span>
-                <p className="text-xs text-white tracking-tight font-mono mb-2 min-h-[1.5rem] bg-zinc-950 p-2 border border-zinc-900 rounded">
-                  {loadingStep}
-                </p>
-                <div className="w-32 mx-auto bg-zinc-950 h-1 rounded-full overflow-hidden border border-zinc-800/60 mt-1">
-                  <div className="h-full bg-emerald-500 rounded-full animate-[loading-bar_10s_infinite_linear]" style={{ width: "75%" }} />
-                </div>
-              </div>
-            </motion.div>
-          )}
-        </AnimatePresence>
 
-        {/* DATA CONTAINER INSIDE SHARP TECH GRID */}
-        <AnimatePresence>
-          {((!loading && reviewResult) || reviewState.loading || reviewState.semantics) && (
-            <motion.div 
-              initial={{ opacity: 0 }}
-              animate={{ opacity: 1 }}
-              className="flex flex-col gap-6"
-              id="review_results_block"
-            >
-              
-              {reviewResult.fetchError && (
-                <div className="p-4 rounded-md bg-amber-950/30 border border-amber-500/30 flex items-start gap-3 text-xs" id="fetch_warning">
-                  <AlertTriangle className="w-5 h-5 text-amber-400 shrink-0 mt-0.5" />
-                  <div>
-                    <strong className="font-semibold text-amber-400 block mb-1">获取 PR 失败，正在使用演示数据</strong>
-                    <p className="font-sans text-[11px] text-zinc-400">{reviewResult.fetchError.message}</p>
-                  </div>
-                </div>
-              )}
-              
-              {((reviewResult.metadata || reviewResult.semantics) && (reviewResult.semantics?.intent || reviewResult.semantics?.impactScope?.length || reviewResult.summary)) && (
-                <div className="bg-zinc-900/40 border border-zinc-800 rounded-xl p-5 flex flex-col gap-3" id="metadata_panel">
-                  {reviewResult.metadata && (
-                    <>
-                      <div className="flex items-center justify-between">
-                        <div className="flex items-center gap-2">
-                          <Github className="w-4 h-4 text-emerald-400" />
-                          <span className="text-xs text-zinc-400 font-mono">
-                            PR #{reviewResult.metadata.pullNumber}
-                          </span>
+              {/* ====== ROW 1 RIGHT: Change Analysis — bottom aligns with radar bottom ====== */}
+              <section className="lg:col-span-8">
+                {(activeState.semantics?.intent || activeState.semantics?.impactScope?.length) ? (
+                  <div className="bg-zinc-900/40 border border-zinc-800 rounded-xl p-5 flex flex-col gap-3 h-full">
+                    <div className="border-t border-zinc-800/60 my-1" />
+
+                    <div className="flex flex-col gap-3 bg-zinc-950/50 border border-zinc-800 rounded-lg p-5 relative overflow-hidden flex-1">
+                      <div className="absolute top-0 left-0 bottom-0 w-1 bg-gradient-to-b from-emerald-500 via-amber-500 to-rose-500" />
+                      <div className="flex items-center justify-between gap-4">
+                        <div className="flex items-center gap-2.5">
+                          <span className="text-xs text-emerald-400 uppercase tracking-[0.2em] font-black">变更分析</span>
+                          {activeState.semantics?.riskLevel && (
+                            <span className={`text-xs px-2.5 py-1 rounded font-black font-mono shadow-lg ${
+                              activeState.semantics.riskLevel === 'high' ? 'bg-rose-600/80 text-white shadow-rose-500/30' :
+                              activeState.semantics.riskLevel === 'medium' ? 'bg-amber-500/80 text-zinc-950 shadow-amber-500/30' :
+                              'bg-emerald-500/80 text-zinc-950 shadow-emerald-500/30'
+                            }`}>
+                              {activeState.semantics.riskLevel === 'high' ? '⚠ HIGH RISK' :
+                               activeState.semantics.riskLevel === 'medium' ? '⚡ MEDIUM' : '✓ LOW'}
+                            </span>
+                          )}
                         </div>
-                        <div className="flex items-center gap-3 text-[10px] text-zinc-500 font-mono">
-                          <span>👤 {reviewResult.metadata.author}</span>
-                          <span>📅 {new Date(reviewResult.metadata.createdAt).toLocaleDateString('zh-CN')}</span>
-                        </div>
-                      </div>
-
-                      <h3 className="text-sm font-bold text-white leading-snug">
-                        {reviewResult.metadata.title}
-                      </h3>
-
-                      {reviewResult.metadata.description && (
-                        <p className="text-[11px] text-zinc-400 leading-relaxed font-sans line-clamp-3">
-                          {reviewResult.metadata.description}
-                        </p>
-                      )}
-
-                      <div className="flex flex-wrap items-center gap-2 text-[10px]">
-                        {reviewResult.metadata.linkedIssues.length > 0 && (
-                          <span className="text-zinc-500">
-                            🔗 Issues: {reviewResult.metadata.linkedIssues.map(i => `#${i.number}`).join(' · ')}
-                          </span>
-                        )}
-                      </div>
-
-                      <div className="border-t border-zinc-800/60 my-1" />
-                    </>
-                  )}
-
-                  {/* Semantics section — always shown when available */}
-                  <div className="flex flex-col gap-3 bg-zinc-950/50 border border-zinc-800 rounded-lg p-5 relative overflow-hidden">
-                    <div className="absolute top-0 left-0 bottom-0 w-1 bg-gradient-to-b from-emerald-500 via-amber-500 to-rose-500" />
-                    <div className="flex items-center gap-2.5">
-                      <span className="text-xs text-emerald-400 uppercase tracking-[0.2em] font-black">变更分析</span>
-                      {reviewResult.semantics?.riskLevel && (
-                        <span className={`text-xs px-2.5 py-1 rounded font-black font-mono shadow-lg ${
-                          reviewResult.semantics.riskLevel === 'high' ? 'bg-rose-600/80 text-white shadow-rose-500/30' :
-                          reviewResult.semantics.riskLevel === 'medium' ? 'bg-amber-500/80 text-zinc-950 shadow-amber-500/30' :
-                          'bg-emerald-500/80 text-zinc-950 shadow-emerald-500/30'
-                        }`}>
-                          {reviewResult.semantics.riskLevel === 'high' ? '⚠ HIGH RISK' :
-                           reviewResult.semantics.riskLevel === 'medium' ? '⚡ MEDIUM' : '✓ LOW'}
-                        </span>
-                      )}
-                    </div>
-                    {reviewResult.semantics?.intent && (
-                      <p className="text-xl font-bold text-white leading-snug tracking-tight">
-                        {reviewResult.semantics.intent}
-                      </p>
-                    )}
-                    {reviewResult.semantics?.impactScope && reviewResult.semantics.impactScope.length > 0 && (
-                      <div className="flex flex-wrap items-center gap-2">
-                        <span className="text-xs text-zinc-500 font-bold shrink-0">📌 影响范围</span>
-                        {reviewResult.semantics.impactScope.map((scope, idx) => (
-                          <span key={idx} className="text-[11px] bg-zinc-800 text-zinc-300 px-2.5 py-1 rounded-full font-sans border border-zinc-700">
-                            {scope}
-                          </span>
-                        ))}
-                      </div>
-                    )}
-                    <p className="text-sm text-zinc-400 leading-relaxed font-sans border-t border-zinc-800/60 pt-3">
-                      {reviewResult.summary}
-                    </p>
-                  </div>
-                </div>
-              )}
-              
-              {/* TWO COLUMN SIDEBAR & COMPARATOR LAYOUT */}
-              <div className="grid grid-cols-1 lg:grid-cols-12 gap-6" id="overview_grids">
-                
-                {/* SIDEBAR: 9-DIMENSION DASHBOARD (SSE) or LEGACY SIDEBAR */}
-                {reviewState.loading || reviewState.semantics ? (
-                  <aside className="lg:col-span-5 flex flex-col gap-4">
-                    {/* Top conclusion bar */}
-                    <div className="bg-zinc-900/40 border border-zinc-800 rounded-xl p-4 flex items-center gap-4">
-                      <div className="w-1 h-10 bg-gradient-to-b from-rose-500 via-amber-500 to-emerald-500 rounded-full shrink-0" />
-                      <div className="flex-1 min-w-0">
-                        <div className="text-[9px] text-zinc-500 uppercase tracking-wider font-bold">审计结论</div>
-                        <div className="text-xs text-white font-bold mt-0.5 truncate">
-                          {reviewState.summary || (reviewState.loading ? '审计进行中...' : '分析中...')}
-                        </div>
-                      </div>
-                      {reviewState.overallScore !== null && (
-                        <div className="text-center shrink-0">
-                          <div className={`text-3xl font-black ${reviewState.overallScore >= 70 ? 'text-emerald-400' : reviewState.overallScore >= 50 ? 'text-amber-400' : 'text-rose-500'}`}>
-                            {reviewState.overallScore}
-                          </div>
-                          {reviewState.overallLevel && <LevelBadge level={reviewState.overallLevel as "critical" | "warning" | "pass" | "na"} />}
-                        </div>
-                      )}
-                    </div>
-
-                    {/* Three-column: sensitive dimensions | radar | engineering dimensions */}
-                    <div className="flex items-start gap-3">
-                      {/* Left: sensitive dimensions */}
-                      <div className="flex flex-col gap-2 w-[155px] shrink-0">
-                        <SecurityCard
-                          data={reviewState.security}
-                          highlighted={highlightedDimension === 'security'}
-                          onHover={(entering: boolean) => setHighlightedDimension(entering ? 'security' : null)}
-                          onClick={() => setExpandedDimension(expandedDimension === 'security' ? null : 'security')}
-                          expanded={expandedDimension === 'security'}
-                        />
-                        <CorrectnessCard
-                          data={reviewState.correctness}
-                          highlighted={highlightedDimension === 'correctness'}
-                          onHover={(entering: boolean) => setHighlightedDimension(entering ? 'correctness' : null)}
-                          onClick={() => setExpandedDimension(expandedDimension === 'correctness' ? null : 'correctness')}
-                          expanded={expandedDimension === 'correctness'}
-                        />
-                        <DependencyCard
-                          data={reviewState.dependency}
-                          highlighted={highlightedDimension === 'dependency'}
-                          onHover={(entering: boolean) => setHighlightedDimension(entering ? 'dependency' : null)}
-                          onClick={() => setExpandedDimension(expandedDimension === 'dependency' ? null : 'dependency')}
-                          expanded={expandedDimension === 'dependency'}
-                        />
-                        {(reviewState.security?._inferred || reviewState.correctness?._inferred || reviewState.dependency?._inferred) && (
-                          <div className="text-[8px] text-zinc-600 text-center mt-1">🔍 部分维度使用本地启发式分析</div>
-                        )}
-                      </div>
-
-                      {/* Center: radar chart */}
-                      <div className="flex-1 flex justify-center">
-                        <RadarChart
-                          security={reviewState.security}
-                          correctness={reviewState.correctness}
-                          dependency={reviewState.dependency}
-                          maintainability={reviewState.maintainability}
-                          architecture={reviewState.architecture}
-                          performance={reviewState.performance}
-                          robustness={reviewState.robustness}
-                          testQuality={reviewState.testQuality}
-                          overallScore={reviewState.overallScore}
-                          highlightedDimension={highlightedDimension}
-                        />
-                      </div>
-
-                      {/* Right: engineering dimensions */}
-                      <div className="flex flex-col gap-1.5 w-[145px] shrink-0">
-                        <EngineeringScoreCard label="可维护性" icon="📝" data={reviewState.maintainability} dim="maintainability"
-                          highlighted={highlightedDimension === 'maintainability'} onHover={(entering: boolean) => setHighlightedDimension(entering ? 'maintainability' : null)}
-                          onClick={() => setExpandedDimension(expandedDimension === 'maintainability' ? null : 'maintainability')}
-                          expanded={expandedDimension === 'maintainability'} />
-                        <EngineeringScoreCard label="架构设计" icon="🏗️" data={reviewState.architecture} dim="architecture"
-                          highlighted={highlightedDimension === 'architecture'} onHover={(entering: boolean) => setHighlightedDimension(entering ? 'architecture' : null)}
-                          onClick={() => setExpandedDimension(expandedDimension === 'architecture' ? null : 'architecture')}
-                          expanded={expandedDimension === 'architecture'} />
-                        <EngineeringScoreCard label="性能" icon="⚡" data={reviewState.performance} dim="performance"
-                          highlighted={highlightedDimension === 'performance'} onHover={(entering: boolean) => setHighlightedDimension(entering ? 'performance' : null)}
-                          onClick={() => setExpandedDimension(expandedDimension === 'performance' ? null : 'performance')}
-                          expanded={expandedDimension === 'performance'} />
-                        <EngineeringScoreCard label="容错健壮" icon="🛟" data={reviewState.robustness} dim="robustness"
-                          highlighted={highlightedDimension === 'robustness'} onHover={(entering: boolean) => setHighlightedDimension(entering ? 'robustness' : null)}
-                          onClick={() => setExpandedDimension(expandedDimension === 'robustness' ? null : 'robustness')}
-                          expanded={expandedDimension === 'robustness'} />
-                        <EngineeringScoreCard label="测试质量" icon="🧪" data={reviewState.testQuality} dim="testQuality"
-                          highlighted={highlightedDimension === 'testQuality'} onHover={(entering: boolean) => setHighlightedDimension(entering ? 'testQuality' : null)}
-                          onClick={() => setExpandedDimension(expandedDimension === 'testQuality' ? null : 'testQuality')}
-                          expanded={expandedDimension === 'testQuality'} />
-                      </div>
-                    </div>
-
-                    {/* Bottom: impact bar */}
-                    <ImpactBar data={reviewState.impact} />
-
-                    {/* Key findings */}
-                    {reviewState.keyFindings.length > 0 && (
-                      <div className="bg-zinc-900/40 border border-zinc-800 rounded-lg p-4">
-                        <div className="text-[9px] text-zinc-500 uppercase font-bold mb-2">关键发现</div>
-                        <div className="flex flex-col gap-1">
-                          {reviewState.keyFindings.map((f: string, i: number) => (
-                            <div key={i} className="text-[10px] text-zinc-300 flex items-start gap-2">
-                              <span className="text-rose-400 shrink-0 mt-0.5">•</span>
-                              <span>{f}</span>
+                        {activeState.overallScore !== null && (
+                          <div className="flex items-center gap-3 shrink-0">
+                            <div className="text-[9px] text-zinc-500 uppercase tracking-wider font-bold">审计结论</div>
+                            <div className={`text-2xl font-black ${(activeState.overallScore ?? 0) >= 70 ? 'text-emerald-400' : (activeState.overallScore ?? 0) >= 50 ? 'text-amber-400' : 'text-rose-500'}`}>
+                              {activeState.overallScore}
                             </div>
+                            <LevelBadge level={(activeState.overallLevel ?? 'pass') as AuditLevel} />
+                          </div>
+                        )}
+                      </div>
+                      {activeState.semantics?.intent && (
+                        <p className="text-xl font-bold text-white leading-snug tracking-tight">{activeState.semantics.intent}</p>
+                      )}
+                      {activeState.semantics?.impactScope && activeState.semantics.impactScope.length > 0 && (
+                        <div className="flex flex-wrap items-center gap-2">
+                          <span className="text-xs text-zinc-500 font-bold shrink-0">📌 影响范围</span>
+                          {activeState.semantics.impactScope.map((scope: string, idx: number) => (
+                            <span key={idx} className="text-[11px] bg-zinc-800 text-zinc-300 px-2.5 py-1 rounded-full font-sans border border-zinc-700">{scope}</span>
                           ))}
                         </div>
-                      </div>
-                    )}
-
-                    {/* Loading indicator */}
-                    {reviewState.loading && !reviewState.semantics && (
-                      <div className="flex items-center justify-center py-8 text-zinc-600 text-xs gap-2">
-                        <div className="w-2 h-2 bg-emerald-500 rounded-full animate-pulse" />
-                        <span>正在分析语义...</span>
-                      </div>
-                    )}
-                  </aside>
+                      )}
+                      {activeState.summary && (
+                        <p className="text-sm text-zinc-400 leading-relaxed font-sans border-t border-zinc-800/60 pt-3">{activeState.summary}</p>
+                      )}
+                    </div>
+                  </div>
                 ) : (
-                  <aside className="lg:col-span-4 flex flex-col gap-5" id="sidebar_analytics">
-
-                  {/* Key Findings — moved above score */}
-                  <div className="bg-zinc-900/30 border border-zinc-800 rounded-xl p-4 flex flex-col gap-3">
-                    <div className="flex items-center gap-2">
-                      <AlertTriangle className="w-3.5 h-3.5 text-amber-400" />
-                      <h3 className="text-[10px] text-zinc-500 uppercase tracking-wider font-bold">关键发现 ({reviewResult.keyFindings.length})</h3>
+                  <div className="bg-zinc-900/20 border border-zinc-800/40 rounded-xl p-5 flex flex-col gap-3 h-full animate-pulse">
+                    <div className="flex items-center gap-2.5 mb-2">
+                      <span className="text-xs text-emerald-400/40 uppercase tracking-[0.2em] font-black">变更分析</span>
+                      <div className="h-5 w-20 bg-zinc-800/60 rounded" />
                     </div>
-                    <ul className="flex flex-col gap-2.5">
-                      {reviewResult.keyFindings.map((finding, idx) => (
-                        <li key={idx} className="flex items-start gap-2 text-[11px] text-zinc-300 leading-relaxed font-sans">
-                          <span className="text-amber-400 shrink-0 select-none mt-0.5 font-bold">{idx + 1}.</span>
-                          <span>{finding}</span>
-                        </li>
-                      ))}
-                    </ul>
+                    <div className="flex flex-col gap-3 bg-zinc-950/30 border border-zinc-800/30 rounded-lg p-5 flex-1">
+                      <div className="h-6 w-3/4 bg-zinc-800/40 rounded" />
+                      <div className="h-4 w-full bg-zinc-800/30 rounded" />
+                      <div className="h-4 w-5/6 bg-zinc-800/30 rounded" />
+                      <div className="h-4 w-2/3 bg-zinc-800/30 rounded" />
+                      <div className="flex gap-2 mt-2">
+                        <div className="h-6 w-16 bg-zinc-800/40 rounded-full" />
+                        <div className="h-6 w-20 bg-zinc-800/40 rounded-full" />
+                        <div className="h-6 w-14 bg-zinc-800/40 rounded-full" />
+                      </div>
+                    </div>
                   </div>
+                )}
+              </section>
 
-                  {/* Score Card */}
-                  <div className="bg-zinc-900/40 border border-zinc-800 rounded-xl p-5 flex flex-col items-center">
-                    <span className="text-[10px] text-zinc-500 uppercase tracking-wider font-bold mb-3">综合评分</span>
-                    
-                    <div className={`text-6xl font-black tracking-tighter ${
-                      reviewResult.overallScore >= 75 ? 'text-emerald-400' : reviewResult.overallScore >= 60 ? 'text-amber-400' : 'text-rose-500'
-                    }`}>
-                      {reviewResult.overallScore}
+              {/* ====== ROW 2 LEFT: Dimension Cards — scrollable, aligned with diff viewer ====== */}
+              <aside ref={leftSidebarRef} className="lg:col-span-4 flex flex-col gap-4 min-h-0 overflow-hidden">
+                <div className="flex flex-col gap-1.5">
+                  {(activeState.security?._inferred || activeState.correctness?._inferred || activeState.dependency?._inferred) && (
+                    <div className="text-[9px] text-zinc-500 text-center shrink-0">🔍 部分维度使用本地启发式分析</div>
+                  )}
+                  {reviewState.loading && (
+                    <div className="flex items-center justify-center gap-2 py-2 px-3 rounded-lg bg-emerald-500/5 border border-emerald-500/15 text-xs mb-1">
+                      <div className="w-2 h-2 bg-emerald-400 rounded-full animate-pulse" />
+                      <span className="text-emerald-300/90 font-mono">
+                        {reviewState.progressMessage || '正在分析语义...'}
+                      </span>
                     </div>
-                    <span className="text-[10px] text-zinc-600 font-mono mt-0.5">/ 100</span>
+                  )}
+                  <React.Fragment key={`security-${activeState.security?.score}-${activeState.security?._inferred}`}>
+                  <SecurityCard
+                    data={activeState.security}
+                    highlighted={highlightedDimension === 'security'}
+                    onHover={(entering: boolean) => setHighlightedDimension(entering ? 'security' : null)}
+                    onClick={() => setExpandedDimension(expandedDimension === 'security' ? null : 'security')}
+                    expanded={expandedDimension === 'security'}
+                    riskItems={activeState.riskItems?.security}
+                    dataflowTraces={activeState.dataflowTraces}
+                  />
+                  </React.Fragment>
+                  <React.Fragment key={`correctness-${activeState.correctness?.score}-${activeState.correctness?._inferred}`}>
+                  <CorrectnessCard
+                    data={activeState.correctness}
+                    highlighted={highlightedDimension === 'correctness'}
+                    onHover={(entering: boolean) => setHighlightedDimension(entering ? 'correctness' : null)}
+                    onClick={() => setExpandedDimension(expandedDimension === 'correctness' ? null : 'correctness')}
+                    expanded={expandedDimension === 'correctness'}
+                    riskItems={activeState.riskItems?.correctness}
+                    dataflowTraces={activeState.dataflowTraces}
+                  />
+                  </React.Fragment>
+                  <React.Fragment key={`dependency-${activeState.dependency?.score}-${activeState.dependency?._inferred}`}>
+                  <DependencyCard
+                    data={activeState.dependency}
+                    highlighted={highlightedDimension === 'dependency'}
+                    onHover={(entering: boolean) => setHighlightedDimension(entering ? 'dependency' : null)}
+                    onClick={() => setExpandedDimension(expandedDimension === 'dependency' ? null : 'dependency')}
+                    expanded={expandedDimension === 'dependency'}
+                  />
+                  </React.Fragment>
+                  <React.Fragment key={`maintainability-${activeState.maintainability?.score}-${activeState.maintainability?._inferred}`}>
+                  <EngineeringScoreCard label="可维护性" icon="📝" data={activeState.maintainability}
+                    highlighted={highlightedDimension === 'maintainability'} onHover={(entering: boolean) => setHighlightedDimension(entering ? 'maintainability' : null)}
+                    onClick={() => setExpandedDimension(expandedDimension === 'maintainability' ? null : 'maintainability')}
+                    expanded={expandedDimension === 'maintainability'} />
+                  </React.Fragment>
+                  <React.Fragment key={`architecture-${activeState.architecture?.score}-${activeState.architecture?._inferred}`}>
+                  <EngineeringScoreCard label="架构设计" icon="🏗️" data={activeState.architecture}
+                    highlighted={highlightedDimension === 'architecture'} onHover={(entering: boolean) => setHighlightedDimension(entering ? 'architecture' : null)}
+                    onClick={() => setExpandedDimension(expandedDimension === 'architecture' ? null : 'architecture')}
+                    expanded={expandedDimension === 'architecture'} />
+                  </React.Fragment>
+                  <React.Fragment key={`performance-${activeState.performance?.score}-${activeState.performance?._inferred}`}>
+                  <EngineeringScoreCard label="性能" icon="⚡" data={activeState.performance}
+                    highlighted={highlightedDimension === 'performance'} onHover={(entering: boolean) => setHighlightedDimension(entering ? 'performance' : null)}
+                    onClick={() => setExpandedDimension(expandedDimension === 'performance' ? null : 'performance')}
+                    expanded={expandedDimension === 'performance'} />
+                  </React.Fragment>
+                  <React.Fragment key={`robustness-${activeState.robustness?.score}-${activeState.robustness?._inferred}`}>
+                  <EngineeringScoreCard label="容错健壮" icon="🛟" data={activeState.robustness}
+                    highlighted={highlightedDimension === 'robustness'} onHover={(entering: boolean) => setHighlightedDimension(entering ? 'robustness' : null)}
+                    onClick={() => setExpandedDimension(expandedDimension === 'robustness' ? null : 'robustness')}
+                    expanded={expandedDimension === 'robustness'} />
+                  </React.Fragment>
+                  <React.Fragment key={`testQuality-${activeState.testQuality?.score}-${activeState.testQuality?._inferred}`}>
+                  <EngineeringScoreCard label="测试质量" icon="🧪" data={activeState.testQuality}
+                    highlighted={highlightedDimension === 'testQuality'} onHover={(entering: boolean) => setHighlightedDimension(entering ? 'testQuality' : null)}
+                    onClick={() => setExpandedDimension(expandedDimension === 'testQuality' ? null : 'testQuality')}
+                    expanded={expandedDimension === 'testQuality'} />
+                  </React.Fragment>
+                </div>
 
-                    <div className="w-full h-1 bg-zinc-800 rounded-full mt-4 overflow-hidden">
-                      <div 
-                        className={`h-full rounded-full transition-all duration-1000 ${
-                          reviewResult.overallScore >= 75 ? 'bg-emerald-500' : reviewResult.overallScore >= 60 ? 'bg-amber-500' : 'bg-rose-500'
-                        }`} 
-                        style={{ width: `${reviewResult.overallScore}%` }}
-                      />
-                    </div>
-
-                    <span className={`text-[10px] mt-3 font-semibold font-sans ${
-                      reviewResult.overallScore >= 75 ? 'text-emerald-400' : reviewResult.overallScore >= 60 ? 'text-amber-400' : 'text-rose-500'
-                    }`}>
-                      {reviewResult.overallScore >= 75 ? '通过审计 · 建议合入' : reviewResult.overallScore >= 60 ? '人工复审 · 存在风险' : '拦截 · 高危威胁'}
-                    </span>
-                  </div>
-
-                  {/* Quality Dimensions */}
-                  <div className="bg-zinc-900/30 border border-zinc-800 rounded-xl p-4 flex flex-col gap-3.5">
-                    <h3 className="text-[10px] text-zinc-500 uppercase tracking-wider font-bold">质量维度</h3>
-                    
-                    {[
-                      { key: 'security', label: '安全性 Security' },
-                      { key: 'readability', label: '可读性 Readability' },
-                      { key: 'performance', label: '性能 Performance' },
-                      { key: 'robustness', label: '容错性 Robustness' },
-                    ].map(({ key, label }) => {
-                      const score = reviewResult.scores[key as keyof typeof reviewResult.scores];
-                      const color = score >= 80 ? 'emerald' : score >= 60 ? 'amber' : 'rose';
-                      return (
-                        <div key={key} className="flex flex-col gap-1">
-                          <div className="flex justify-between text-[10px] font-mono">
-                            <span className="text-zinc-400">{label}</span>
-                            <span className={`text-${color}-400`}>{score}%</span>
-                          </div>
-                          <div className="h-1 bg-zinc-800 rounded-full overflow-hidden">
-                            <div className={`h-full rounded-full bg-${color}-500 transition-all duration-1000`} style={{ width: `${score}%` }} />
-                          </div>
+                {activeState.keyFindings && activeState.keyFindings.length > 0 && (
+                  <div className="bg-zinc-900/40 border border-zinc-800 rounded-lg p-4 shrink-0">
+                    <div className="text-[9px] text-zinc-500 uppercase font-bold mb-2">关键发现</div>
+                    <div className="flex flex-col gap-1">
+                      {activeState.keyFindings.map((f: string, i: number) => (
+                        <div key={i} className="text-[10px] text-zinc-300 flex items-start gap-2">
+                          <span className="text-rose-400 shrink-0 mt-0.5">•</span>
+                          <span>{f}</span>
                         </div>
+                      ))}
+                    </div>
+                  </div>
+                )}
+
+              </aside>
+
+              {/* ====== ROW 2 RIGHT: Diff Viewer — top/bottom aligned with dimension cards ====== */}
+              <section className="lg:col-span-8 flex flex-col min-h-0 bg-zinc-900 border border-zinc-800 overflow-hidden" id="diff_explorer">
+                
+                {/* FILE SELECTOR BAR */}
+                <div className="bg-zinc-800/35 px-4 py-2 border-b border-zinc-800 flex items-center gap-3">
+                  <span className="text-[10px] text-zinc-500 uppercase tracking-wider font-bold shrink-0">文件</span>
+                  <div ref={fileTabsRef} className="flex-1 overflow-x-auto flex gap-1 hide-scrollbar cursor-default" title="滚轮切换文件">
+                    {parsedFiles.map((fFile) => {
+                      const risk = fileRiskMap[fFile.fileName];
+                      const active = fFile.fileName === selectedFile;
+                      const badgeColor = !risk ? '' :
+                        risk.highest === 'high' ? 'bg-rose-600 text-white' :
+                        risk.highest === 'medium' ? 'bg-amber-500 text-zinc-950' :
+                        'bg-zinc-600 text-zinc-300';
+                      return (
+                        <button
+                          key={fFile.fileName}
+                          onClick={() => setSelectedFile(fFile.fileName)}
+                          className={`px-2.5 py-1 text-[10px] font-mono border rounded transition-all shrink-0 cursor-pointer flex items-center gap-1 ${
+                            active ? 'bg-zinc-950 border-emerald-500/40 text-white font-semibold' : 'bg-zinc-900/40 border-zinc-800 text-zinc-500 hover:text-zinc-300 hover:border-zinc-700'
+                          }`}
+                        >
+                          <span className="truncate max-w-[160px]">{fFile.fileName.split('/').pop()}</span>
+                          {risk && risk.total > 0 && (
+                            <span className={`px-1 text-[9px] rounded font-bold ${badgeColor}`} title={`高风险 ${risk.high} | 中风险 ${risk.medium} | 低风险 ${risk.low}`}>
+                              {risk.total}
+                            </span>
+                          )}
+                        </button>
                       );
                     })}
                   </div>
-
-                  </aside>
-                )}
-
-                {/* RIGHT CELL: CORE DOUBLE COLUMN DIFF COMPILER WITH INTERACTIVE REVIEW CARDS */}
-                <section className={`${reviewState.loading || reviewState.semantics ? 'lg:col-span-7' : 'lg:col-span-8'} flex flex-col bg-zinc-900 border border-zinc-800 rounded-xl overflow-hidden`} id="diff_explorer">
-                  
-                  {/* FILE SELECTOR BAR */}
-                  <div className="bg-zinc-800/35 px-4 py-2 border-b border-zinc-800 flex items-center gap-3">
-
-                    <span className="text-[10px] text-zinc-500 uppercase tracking-wider font-bold shrink-0">文件</span>
-                    
-                    <div
-                      ref={fileTabsRef}
-                                            className="flex-1 overflow-x-auto flex gap-1 hide-scrollbar cursor-default"
-                      title="滚轮切换文件"
-                    >
-                      {parsedFiles.map((fFile) => {
-                        const count = (reviewResult?.comments || []).filter(c => c.filePath === fFile.fileName).length;
-                        const active = fFile.fileName === selectedFile;
-                        return (
-                          <button
-                            key={fFile.fileName}
-                            onClick={() => setSelectedFile(fFile.fileName)}
-                            className={`px-2.5 py-1 text-[10px] font-mono border rounded transition-all shrink-0 cursor-pointer flex items-center gap-1 ${
-                              active 
-                                ? 'bg-zinc-950 border-emerald-500/40 text-white font-semibold' 
-                                : 'bg-zinc-900/40 border-zinc-800 text-zinc-500 hover:text-zinc-300 hover:border-zinc-700'
-                            }`}
-                          >
-                            <span className="truncate max-w-[160px]">{fFile.fileName.split('/').pop()}</span>
-                            {count > 0 && (
-                              <span className="px-1 bg-rose-950 text-rose-400 text-[9px] rounded font-bold">{count}</span>
-                            )}
-                          </button>
-                        );
-                      })}
+                  {parsedFiles.length > 1 && (
+                    <div className="relative shrink-0">
+                      <button
+                        onClick={() => setShowFileDropdown(!showFileDropdown)}
+                        className="flex items-center gap-1.5 text-[10px] text-zinc-300 font-bold font-mono bg-zinc-800/60 hover:bg-zinc-700/60 px-2 py-1 rounded border border-zinc-700 hover:border-zinc-500 transition cursor-pointer"
+                      >
+                        <span>{parsedFiles.length} files</span>
+                        <span className={`text-zinc-500 transition-transform duration-200 ${showFileDropdown ? 'rotate-180' : ''}`}>▼</span>
+                      </button>
+                      {showFileDropdown && (
+                        <>
+                          <div className="fixed inset-0 z-10" onClick={() => setShowFileDropdown(false)} />
+                          <div className="absolute right-0 top-full mt-1 z-20 bg-zinc-900 border border-zinc-700 rounded-lg shadow-2xl min-w-[220px] max-h-[280px] overflow-y-auto py-1">
+                            {parsedFiles.map((fFile) => {
+                              const risk = fileRiskMap[fFile.fileName];
+                              const active = fFile.fileName === selectedFile;
+                              const badgeColor = !risk ? '' :
+                                risk.highest === 'high' ? 'bg-rose-600 text-white' :
+                                risk.highest === 'medium' ? 'bg-amber-500 text-zinc-950' :
+                                'bg-zinc-600 text-zinc-300';
+                              return (
+                                <button
+                                  key={fFile.fileName}
+                                  onClick={() => { setSelectedFile(fFile.fileName); setShowFileDropdown(false); }}
+                                  className={`w-full text-left px-3 py-1.5 text-[10px] font-mono flex items-center justify-between gap-2 transition cursor-pointer ${
+                                    active ? 'bg-emerald-500/10 text-emerald-400 font-bold' : 'text-zinc-400 hover:bg-zinc-800 hover:text-zinc-200'
+                                  }`}
+                                >
+                                  <span className="truncate">{fFile.fileName.split('/').pop()}</span>
+                                  <div className="flex items-center gap-1.5 shrink-0">
+                                    {risk && risk.total > 0 && (
+                                      <span className={`px-1 text-[9px] rounded font-bold ${badgeColor}`} title={`高风险 ${risk.high} | 中风险 ${risk.medium} | 低风险 ${risk.low}`}>
+                                        {risk.total}
+                                      </span>
+                                    )}
+                                    {active && <span className="text-emerald-400 text-[8px]">●</span>}
+                                  </div>
+                                </button>
+                              );
+                            })}
+                          </div>
+                        </>
+                      )}
                     </div>
+                  )}
+                </div>
 
-                    {parsedFiles.length > 1 && (
-                      <div className="relative shrink-0">
-                        <button
-                          onClick={() => setShowFileDropdown(!showFileDropdown)}
-                          className="flex items-center gap-1.5 text-[10px] text-zinc-300 font-bold font-mono bg-zinc-800/60 hover:bg-zinc-700/60 px-2 py-1 rounded border border-zinc-700 hover:border-zinc-500 transition cursor-pointer"
-                          title="点击选择文件"
-                        >
-                          <span>{parsedFiles.length} files</span>
-                          <span className={`text-zinc-500 transition-transform duration-200 ${showFileDropdown ? 'rotate-180' : ''}`}>▼</span>
-                        </button>
-                        {showFileDropdown && (
-                          <>
-                            <div className="fixed inset-0 z-10" onClick={() => setShowFileDropdown(false)} />
-                            <div className="absolute right-0 top-full mt-1 z-20 bg-zinc-900 border border-zinc-700 rounded-lg shadow-2xl min-w-[220px] max-h-[280px] overflow-y-auto py-1">
-                              {parsedFiles.map((fFile) => {
-                                const count = (reviewResult?.comments || []).filter(c => c.filePath === fFile.fileName).length;
-                                const active = fFile.fileName === selectedFile;
+                {/* CODE LINES VIEWPORT */}
+                <div
+                  className="flex-1 overflow-auto relative p-4 bg-zinc-950"
+                  id="diff_code_viewport"
+                >
+                  {(() => {
+                    const activeFileObj = parsedFiles.find(f => f.fileName === selectedFile);
+                    if (!activeFileObj) {
+                      return (
+                        <div className="p-12 text-center text-zinc-600 font-sans text-xs">
+                          没有检测到合适的代码变更差异段
+                        </div>
+                      );
+                    }
+                    const activeFileComments = (allComments).filter(c => c.filePath === selectedFile);
+                    const metaLineIndices: number[] = [];
+                    activeFileObj.lines.forEach((l, i) => { if (l.type === 'header') metaLineIndices.push(i); });
+                    const showMeta = expandedHeaders[selectedFile] ?? false;
+                    return (
+                      <div className="min-w-[620px] font-mono text-[11px] leading-6 bg-zinc-950 rounded-md border border-zinc-900 overflow-hidden">
+                        {metaLineIndices.length > 0 && (
+                          <div onClick={() => setExpandedHeaders(prev => ({ ...prev, [selectedFile]: !showMeta }))}
+                            className="flex items-center gap-2 px-3 py-1.5 bg-zinc-900/60 cursor-pointer hover:bg-zinc-900/80 transition select-none border-b border-zinc-900">
+                            <span className="text-[10px] text-zinc-500 transition-transform duration-200 shrink-0" style={{ transform: showMeta ? 'rotate(90deg)' : 'rotate(0deg)' }}>▶</span>
+                            <span className="text-[10px] text-zinc-400 font-semibold shrink-0">FILE HEADER</span>
+                            <span className="text-[9px] text-zinc-500 shrink-0 ml-auto">{metaLineIndices.length} lines</span>
+                          </div>
+                        )}
+                        {activeFileObj.lines.map((line, lineIdx) => {
+                          if (!showMeta && metaLineIndices.includes(lineIdx)) return null;
+                          const matchedComments = activeFileComments.filter((cmt) => {
+                            const trimmedLine = line.content.trim();
+                            const trimmedOriginal = cmt.originalContent.trim().replace(/^[\+\-]/, "").trim();
+                            return trimmedLine.length > 5 && (trimmedLine.includes(trimmedOriginal) || trimmedOriginal.includes(trimmedLine) || cmt.lineNumber === line.newLine);
+                          });
+                          let gutterClass = "bg-zinc-950 text-zinc-700";
+                          let rowClass = "text-zinc-400";
+                          let displayPrefix = " ";
+                          if (line.type === 'add') { gutterClass = "bg-zinc-950 text-zinc-600"; rowClass = "text-emerald-300 border-l-2 border-emerald-500/40"; displayPrefix = "+"; }
+                          else if (line.type === 'delete') { gutterClass = "bg-zinc-950 text-zinc-600"; rowClass = "text-rose-300 border-l-2 border-rose-500/40"; displayPrefix = "-"; }
+                          else if (line.type === 'header') { gutterClass = "bg-zinc-900/50 text-zinc-600"; rowClass = "text-white font-semibold py-0.5"; displayPrefix = "#"; }
+                          return (
+                            <div key={lineIdx} className="flex flex-col">
+                              <div className={`flex items-center group/line ${line.type === 'header' ? 'bg-zinc-900/50 text-[10px]' : 'bg-zinc-950 hover:bg-zinc-900/20'} ${rowClass}`}>
+                                <div className={`w-10 text-right pr-2 select-none border-r border-zinc-900/80 text-[10px] shrink-0 py-px group-hover/line:bg-zinc-900/20 ${gutterClass}`}>{line.oldLine || ""}</div>
+                                <div className={`w-10 text-right pr-2 select-none border-r border-zinc-900/80 text-[10px] shrink-0 py-px group-hover/line:bg-zinc-900/20 ${gutterClass}`}>{line.newLine || ""}</div>
+                                <div className="flex-1 pl-3 font-mono whitespace-pre break-all select-text py-px">
+                                  <span className="text-zinc-600 select-none inline-block w-3">{displayPrefix}</span>
+                                  {line.content}
+                                </div>
+                              </div>
+                              {matchedComments.map((comment) => {
+                                const isResolved = resolvedIssues[comment.id];
                                 return (
-                                  <button
-                                    key={fFile.fileName}
-                                    onClick={() => { setSelectedFile(fFile.fileName); setShowFileDropdown(false); }}
-                                    className={`w-full text-left px-3 py-1.5 text-[10px] font-mono flex items-center justify-between gap-2 transition cursor-pointer ${
-                                      active
-                                        ? 'bg-emerald-500/10 text-emerald-400 font-bold'
-                                        : 'text-zinc-400 hover:bg-zinc-800 hover:text-zinc-200'
-                                    }`}
-                                  >
-                                    <span className="truncate">{fFile.fileName.split('/').pop()}</span>
-                                    <div className="flex items-center gap-1.5 shrink-0">
-                                      {count > 0 && (
-                                        <span className="px-1 bg-rose-950 text-rose-400 text-[9px] rounded font-bold">{count}</span>
-                                      )}
-                                      {active && <span className="text-emerald-400 text-[8px]">●</span>}
+                                  <div key={comment.id} className="ml-10 sm:ml-20 my-3.5 mr-4 relative font-sans">
+                                    <div className="absolute -left-6 top-1/2 w-6 h-[1.5px] bg-rose-500/40 select-none" />
+                                    <div className="bg-zinc-950 border border-rose-500/30 rounded-lg p-4 shadow-2xl relative overflow-hidden">
+                                      <div className="absolute top-0 left-0 right-0 h-[1px] bg-gradient-to-r from-rose-500/50 to-transparent" />
+                                      <div className="flex items-center justify-between mb-2">
+                                        <div className="flex items-center gap-2">
+                                          <span className={`text-[9px] px-1.5 py-0.5 rounded font-black uppercase text-white font-mono ${comment.severity === 'high' ? 'bg-rose-600' : 'bg-amber-600'}`}>
+                                            {comment.severity === 'high' ? 'High Risk' : 'Medium Warning'}
+                                          </span>
+                                          <span className="text-[11px] font-bold text-zinc-100 font-mono">
+                                            {comment.severity === 'high' ? '🎯 安全红线拦截警告' : '⚡ 性能架构诊断'}
+                                          </span>
+                                        </div>
+                                        <button type="button" onClick={() => toggleIssueResolution(comment.id)}
+                                          className={`text-[10px] sm:text-[11px] font-mono px-2 py-0.5 rounded border flex items-center gap-1.5 transition cursor-pointer ${
+                                            isResolved ? 'bg-emerald-950/40 border-emerald-800 text-emerald-400' : 'bg-zinc-950 border-zinc-800 text-zinc-500 hover:text-zinc-300'
+                                          }`}>
+                                          {isResolved ? <><CheckCircle2 className="w-3.5 h-3.5" /><span>已修复</span></> : <><Square className="w-3 h-3 text-zinc-650" /><span>标记已修复</span></>}
+                                        </button>
+                                      </div>
+                                      <p className={`text-[11px] leading-relaxed text-zinc-300 mb-3.5 whitespace-normal ${isResolved ? 'line-through opacity-50' : ''}`}>{comment.description}</p>
+                                      <div className="bg-emerald-950/15 border border-emerald-900/45 rounded p-3 text-[11px] font-sans">
+                                        <div className="flex justify-between items-center mb-1.5">
+                                          <span className="text-[10px] text-emerald-400 uppercase font-mono font-bold tracking-wider">修复方案</span>
+                                          <button onClick={() => copyToClipboard(comment.suggestion, comment.id)}
+                                            className="text-[9px] text-zinc-500 hover:text-white flex items-center gap-1 cursor-pointer font-mono">
+                                            {copiedCodeId === comment.id ? <span className="text-emerald-400 font-bold">复制成功</span> : <span>[ COPY ]</span>}
+                                          </button>
+                                        </div>
+                                        <code className="text-xs text-zinc-300 block bg-zinc-950/80 p-2 border border-zinc-900 rounded font-mono break-all whitespace-pre-wrap select-all leading-5">
+                                          {comment.suggestion.replace(/```[a-z]*\n?/g, "").replace(/```$/g, "")}
+                                        </code>
+                                      </div>
                                     </div>
-                                  </button>
+                                  </div>
                                 );
                               })}
                             </div>
-                          </>
-                        )}
+                          );
+                        })}
                       </div>
-                    )}
-
-                  </div>
-
-                  {/* MAIN CODELINES LIST CONTAINER WITH REAL HOVER SCANNER EFFECT */}
-                  <div className="flex-1 overflow-auto relative p-4 max-h-[640px] bg-zinc-950" id="diff_code_viewport">
-                    
-                    {(() => {
-                      const activeFileObj = parsedFiles.find(f => f.fileName === selectedFile);
-                      if (!activeFileObj) {
-                        return (
-                          <div className="p-12 text-center text-zinc-600 font-sans text-xs">
-                            {"没有检测到本分支中合适的文件代码库更改差异段。"}
-                          </div>
-                        );
-                      }
-
-                      // Filter any AI comments bound to this active file
-                      const activeFileComments = (reviewResult?.comments || []).filter(
-                        (c) => c.filePath === selectedFile
-                      );
-
-                      const metaLineIndices: number[] = [];
-                      activeFileObj.lines.forEach((l, i) => {
-                        if (l.type === 'header') {
-                          metaLineIndices.push(i);
-                        }
-                      });
-                      const showMeta = expandedHeaders[selectedFile] ?? false;
-
-                      return (
-                        <div className="min-w-[620px] font-mono text-[11px] leading-6 bg-zinc-950 rounded-md border border-zinc-900 overflow-hidden">
-                          {metaLineIndices.length > 0 && (
-                            <div
-                              onClick={() => setExpandedHeaders(prev => ({ ...prev, [selectedFile]: !showMeta }))}
-                              className="flex items-center gap-2 px-3 py-1.5 bg-zinc-900/60 cursor-pointer hover:bg-zinc-900/80 transition select-none border-b border-zinc-900"
-                            >
-                              <span className="text-[10px] text-zinc-500 transition-transform duration-200 shrink-0" style={{ transform: showMeta ? 'rotate(90deg)' : 'rotate(0deg)' }}>▶</span>
-                              <span className="text-[10px] text-zinc-400 font-semibold shrink-0">FILE HEADER</span>
-                              <span className="text-[9px] text-zinc-500 shrink-0 ml-auto">{metaLineIndices.length} lines</span>
-                            </div>
-                          )}
-
-                          {activeFileObj.lines.map((line, lineIdx) => {
-                            if (!showMeta && metaLineIndices.includes(lineIdx)) return null;
-
-                            const matchedComments = activeFileComments.filter((cmt) => {
-                              const trimmedLine = line.content.trim();
-                              const trimmedOriginal = cmt.originalContent.trim().replace(/^[\+\-]/, "").trim();
-                              
-                              return (
-                                trimmedLine.length > 5 && 
-                                (trimmedLine.includes(trimmedOriginal) || trimmedOriginal.includes(trimmedLine) || cmt.lineNumber === line.newLine)
-                              );
-                            });
-
-                            let gutterClass = "bg-zinc-950 text-zinc-700";
-                            let rowClass = "text-zinc-400";
-                            let displayPrefix = " ";
-
-                            if (line.type === 'add') {
-                              gutterClass = "bg-zinc-950 text-zinc-600";
-                              rowClass = "text-emerald-300 border-l-2 border-emerald-500/40";
-                              displayPrefix = "+";
-                            } else if (line.type === 'delete') {
-                              gutterClass = "bg-zinc-950 text-zinc-600";
-                              rowClass = "text-rose-300 border-l-2 border-rose-500/40";
-                              displayPrefix = "-";
-                            } else if (line.type === 'header') {
-                              gutterClass = "bg-zinc-900/50 text-zinc-600";
-                              rowClass = "text-white font-semibold py-0.5";
-                              displayPrefix = "#";
-                            }
-
-                            return (
-                              <div key={lineIdx} className="flex flex-col">
-                                
-                                <div className={`flex items-center group/line ${line.type === 'header' ? 'bg-zinc-900/50 text-[10px]' : 'bg-zinc-950 hover:bg-zinc-900/20'} ${rowClass}`}>
-                                  <div className={`w-10 text-right pr-2 select-none border-r border-zinc-900/80 text-[10px] shrink-0 py-px group-hover/line:bg-zinc-900/20 ${gutterClass}`}>
-                                    {line.oldLine || ""}
-                                  </div>
-                                  <div className={`w-10 text-right pr-2 select-none border-r border-zinc-900/80 text-[10px] shrink-0 py-px group-hover/line:bg-zinc-900/20 ${gutterClass}`}>
-                                    {line.newLine || ""}
-                                  </div>
-
-                                  <div className="flex-1 pl-3 font-mono whitespace-pre break-all select-text py-px">
-                                    <span className="text-zinc-600 select-none inline-block w-3">{displayPrefix}</span>
-                                    {line.content}
-                                    {reviewResult?.codeBlocks && (() => {
-                                      const matchedBlock = reviewResult.codeBlocks.find(
-                                        (b) => b.filePath === selectedFile && b.lineNumber === line.newLine
-                                      );
-                                      if (matchedBlock) {
-                                        return (
-                                          <span className="ml-2 text-[9px] bg-blue-950/50 text-blue-400/80 px-1.5 py-0.5 rounded font-mono select-none inline-flex items-center gap-1">
-                                            <span className="text-blue-500">
-                                              {matchedBlock.type === 'function' ? '\u0192' :
-                                               matchedBlock.type === 'class' ? 'C' :
-                                               matchedBlock.type === 'interface' ? 'I' : 'E'}
-                                            </span>
-                                            {matchedBlock.name}
-                                          </span>
-                                        );
-                                      }
-                                      return null;
-                                    })()}
-                                  </div>
-                                </div>
-
-                                {/* AI COMPILED FEEDBACK FLOAT CARD (Inline card with beautiful visual guidelines) */}
-                                {matchedComments.map((comment) => {
-                                  const isResolved = resolvedIssues[comment.id];
-
-                                  return (
-                                    <div 
-                                      key={comment.id}
-                                      className="ml-10 sm:ml-20 my-3.5 mr-4 relative font-sans"
-                                    >
-                                      {/* Architectural Node Guide Joint Connector */}
-                                      <div className="absolute -left-6 top-1/2 w-6 h-[1.5px] bg-rose-500/40 select-none" />
-
-                                      {/* Audit Container card */}
-                                      <div className="bg-zinc-950 border border-rose-500/30 rounded-lg p-4 shadow-2xl relative overflow-hidden">
-                                        <div className="absolute top-0 left-0 right-0 h-[1px] bg-gradient-to-r from-rose-500/50 to-transparent" />
-
-                                        <div className="flex items-center justify-between mb-2">
-                                          <div className="flex items-center gap-2">
-                                            <span className={`text-[9px] px-1.5 py-0.5 rounded font-black uppercase text-white font-mono ${
-                                              comment.severity === 'high' ? 'bg-rose-600' : 'bg-amber-600'
-                                            }`}>
-                                              {comment.severity === 'high' ? 'High Risk' : comment.severity === 'medium' ? 'Medium Warning' : 'Suggestion'}
-                                            </span>
-                                            <span className="text-[11px] font-bold text-zinc-100 font-mono">
-                                              {comment.severity === 'high' ? '🎯 安全红线拦截警告' : '⚡ 性能架构诊断'}
-                                            </span>
-                                          </div>
-                                          
-                                          {/* Resolve Toggle Indicator */}
-                                          <button 
-                                            type="button"
-                                            onClick={() => toggleIssueResolution(comment.id)}
-                                            className={`text-[10px] sm:text-[11px] font-mono px-2 py-0.5 rounded border flex items-center gap-1.5 transition cursor-pointer ${
-                                              isResolved 
-                                                ? 'bg-emerald-950/40 border-emerald-800 text-emerald-400'
-                                                : 'bg-zinc-950 border-zinc-800 text-zinc-500 hover:text-zinc-300'
-                                            }`}
-                                          >
-                                            {isResolved ? (
-                                              <>
-                                                <CheckCircle2 className="w-3.5 h-3.5" />
-                                                <span>已修复 / Checked</span>
-                                              </>
-                                            ) : (
-                                              <>
-                                                <Square className="w-3 h-3 text-zinc-650" />
-                                                <span>标记已执行修复</span>
-                                              </>
-                                            )}
-                                          </button>
-                                        </div>
-
-                                        <p className={`text-[11px] leading-relaxed text-zinc-300 mb-3.5 whitespace-normal ${isResolved ? 'line-through opacity-50' : ''}`}>
-                                          {comment.description}
-                                        </p>
-
-                                        {/* Suggested Fix Container */}
-                                        <div className="bg-emerald-950/15 border border-emerald-900/45 rounded p-3 text-[11px] font-sans">
-                                          <div className="flex justify-between items-center mb-1.5">
-                                            <span className="text-[10px] text-emerald-400 uppercase font-mono font-bold tracking-wider">Suggested Rewrite / 修复方案</span>
-                                            
-                                            <button
-                                              onClick={() => copyToClipboard(comment.suggestion, comment.id)}
-                                              className="text-[9px] text-zinc-500 hover:text-white flex items-center gap-1 cursor-pointer font-mono"
-                                            >
-                                              {copiedCodeId === comment.id ? (
-                                                <span className="text-emerald-400 font-bold">复制成功</span>
-                                              ) : (
-                                                <span>[ COPY CODE ]</span>
-                                              )}
-                                            </button>
-                                          </div>
-                                          <code className="text-xs text-zinc-300 block bg-zinc-950/80 p-2 border border-zinc-900 rounded font-mono break-all whitespace-pre-wrap select-all leading-5">
-                                            {comment.suggestion.replace(/```[a-z]*\n?/g, "").replace(/```$/g, "")}
-                                          </code>
-                                        </div>
-
-                                      </div>
-                                    </div>
-                                  );
-                                })}
-
-                              </div>
-                            );
-                          })}
-                        </div>
-                      );
-                    })()}
-
-                  </div>
-
-                </section>
-
-              </div>
-
-            </motion.div>
-          )}
-        </AnimatePresence>
+                    );
+                  })()}
+                </div>
+              </section>
+            </div>
+          </motion.div>
+        )}
 
       </main>
 

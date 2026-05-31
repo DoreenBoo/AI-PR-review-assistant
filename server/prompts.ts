@@ -65,6 +65,131 @@ ${diffText}
 }
 
 // ==========================================
+// Section 9: Phase 4 Dataflow Tracing (Deep Review)
+// ==========================================
+
+export function getDataflowTraceSystemPrompt(): string {
+  return `You are a senior application security researcher performing DATAFLOW TRACING. Your task is to trace the complete path of untrusted data from entry point to sensitive operation, determining whether a security vulnerability actually exists.
+
+## METHODOLOGY
+
+For each risk item, perform this analysis:
+
+1. **SOURCE identification**: Find ALL external data entry points in the provided code context.
+   - Web: req.body, req.query, req.params, req.headers, req.cookies, URL parameters
+   - File: fs.readFile, file uploads, stream inputs
+   - Network: fetch/axios responses, WebSocket messages, message queue consumers
+
+2. **TRANSFORM tracking**: Trace every transformation applied to the input.
+   - Validation: schema validation, type checks, allowlisting
+   - Sanitization: HTML escaping, SQL escaping, path normalization
+   - Encoding: base64 decode, URL decode, JSON parse
+   - Obfuscation: concatenation, template strings, object spread
+
+3. **SINK identification**: Determine if data reaches a sensitive operation.
+   - SQL: db.query(), db.execute(), knex.raw(), sequelize.query(), .createQueryBuilder()
+   - NoSQL: collection.find({ $where: ... }), .aggregate(), Model.find(query)
+   - HTML: res.send(), innerHTML=, dangerouslySetInnerHTML, document.write()
+   - Command: exec(), spawn(), child_process.exec(), eval(), new Function()
+   - File: fs.writeFile(), fs.createWriteStream(), path.join(untrusted, ...)
+   - Auth: jwt.verify() without proper options, session assignment without validation
+
+4. **SECURITY CONTROL analysis**: For each point between SOURCE and SINK, check if any control prevents exploitation:
+   - Is there parameterized query usage? (for SQL injection)
+   - Is there HTML escaping? (for XSS)
+   - Is there path.resolve() before file read? (for path traversal)
+   - Is there schema validation after deserialization? (for insecure deserialization)
+
+## OUTPUT
+
+For each risk item, produce:
+- "traced": boolean — was a complete path found from SOURCE to SINK?
+- "finalVerdict": "confirmed_risk" | "false_positive" | "inconclusive"
+  - "confirmed_risk": Exploitable path confirmed with no effective controls
+  - "false_positive": Security control effectively prevents exploitation
+  - "inconclusive": Cannot determine from available context
+- "dataflowPath": array of nodes — each step in the flow (SOURCE → TRANSFORM → SINK)
+- "attackScenario": string (Chinese) — concrete attack example, only if confirmed_risk
+- "mitigationsFound": string[] — any security controls discovered
+
+All descriptions and scenarios MUST be in Chinese.`;
+}
+
+export function getDataflowTraceUserPrompt(
+  riskItemId: string,
+  riskItemLabel: string,
+  riskSeverity: string,
+  codeLocations: { filePath: string; lineNumber: number; context: string }[],
+  fullDiff: string
+): string {
+  const locationsBlock = codeLocations.map(loc =>
+    `### ${loc.filePath}:${loc.lineNumber}\n\`\`\`\n${loc.context}\n\`\`\``
+  ).join('\n\n');
+
+  return `## RISK ITEM
+- ID: ${riskItemId}
+- Label: ${riskItemLabel}
+- Severity: ${riskSeverity}
+
+## CODE LOCATIONS TO TRACE
+${locationsBlock}
+
+## TASK
+For the risk item above, trace the complete dataflow from SOURCE (untrusted input) through TRANSFORMS to SINK (sensitive operation). Determine whether the risk is confirmed, a false positive, or inconclusive.
+
+## FULL DIFF FOR CONTEXT
+--- GIT DIFF START ---
+${fullDiff}
+--- GIT DIFF END ---`;
+}
+
+export function getDataflowTraceJsonSchema(): string {
+  return `Return ONLY a valid JSON object. Do NOT use markdown code fences:
+{
+  "itemId": "sql_injection",
+  "traced": true,
+  "finalVerdict": "confirmed_risk",
+  "dataflowPath": [
+    { "step": 1, "node": "SOURCE", "code": "const username = req.body.username", "location": "src/login.ts:12" },
+    { "step": 2, "node": "TRANSFORM", "code": "const sql = \\"SELECT * FROM users WHERE name='\\" + username + \\"'\\"", "location": "src/login.ts:45" },
+    { "step": 3, "node": "SINK", "code": "await db.query(sql)", "location": "src/login.ts:47" }
+  ],
+  "attackScenario": "攻击者在登录表单的Username字段中注入 ' OR '1'='1' -- ，绕过认证并获取所有用户数据",
+  "mitigationsFound": []
+}`;
+}
+
+export function getCorrectnessVerifyUserPrompt(
+  riskItemId: string,
+  riskItemLabel: string,
+  riskSeverity: string,
+  evidence: string,
+  codeLocations: { filePath: string; lineNumber: number; context: string }[],
+  fullDiff: string
+): string {
+  const locationsBlock = codeLocations.map(loc =>
+    `### ${loc.filePath}:${loc.lineNumber}\n\`\`\`\n${loc.context}\n\`\`\``
+  ).join('\n\n');
+
+  return `## RISK ITEM
+- ID: ${riskItemId}
+- Label: ${riskItemLabel}
+- Severity: ${riskSeverity}
+- Phase 2 Evidence: ${evidence}
+
+## CODE LOCATIONS TO VERIFY
+${locationsBlock}
+
+## TASK
+Simulate the code execution path for the correctness concern above. Determine if this is a confirmed bug, a false positive, or inconclusive.
+
+## FULL DIFF FOR CONTEXT
+--- GIT DIFF START ---
+${fullDiff}
+--- GIT DIFF END ---`;
+}
+
+// ==========================================
 // Section 2: Phase 2 Context Builder
 // ==========================================
 
@@ -99,49 +224,13 @@ ${diffText}
 // ==========================================
 
 export function getSecurityPrompt(): { systemInstruction: string; jsonSchema: string } {
-  const systemInstruction = `You are a Senior Security Engineer performing a focused security vulnerability audit.
+  const systemInstruction = `You are a Senior Security Engineer performing a focused security vulnerability audit. ALL findings and descriptions MUST be in Chinese.
+FOCUS: SQL/NoSQL injection, XSS/HTML injection, hardcoded credentials (passwords/keys/tokens), authentication/authorization bypass, cryptographic flaws (MD5/SHA1, weak ciphers), path traversal/IDOR, insecure deserialization.
 
-FOCUS ONLY ON:
-1. SQL/NoSQL injection (string concatenation in queries, raw execution without parameterization)
-2. XSS / HTML injection (innerHTML, dangerouslySetInnerHTML, unescaped output)
-3. Hardcoded credentials (passwords, API keys, tokens, secrets in source code)
-4. Authentication/authorization bypass (missing permission checks, weak session management)
-5. Cryptographic flaws (MD5/SHA1 for passwords, weak ciphers, hardcoded salts/keys)
-6. Path traversal / IDOR (user-controlled file paths, direct object references)
-7. Insecure deserialization
+LEVELS: "critical" (SQL injection, hardcoded secret, auth bypass, XSS → score≤30) | "warning" (weak crypto, unsafe config, info leak → score 40-65) | "pass" (no issues → score≥85) | "na" (no security-relevant code in diff).
+Do NOT flag ugly code, missing comments, or performance issues as security problems.`;
 
-SEVERITY RULES:
-  "critical" — Any SQL injection, hardcoded secret, auth bypass, or XSS found → score ≤ 30
-  "warning"  — Medium-risk findings (weak crypto, unsafe config, info leakage) → score 40-65
-  "pass"     — No security issues found → score ≥ 85
-  "na"       — No security-relevant code in the diff (pure styles, docs, config formats)
-
-⚠️ BOUNDARY RULES:
-  • Do NOT flag code as insecure just because it "looks ugly"
-  • Do NOT evaluate encryption performance overhead (performance dimension)
-  • Do NOT evaluate "is error handling complete" — unless missing error handling causes information leakage
-  • If code "looks dangerous but is actually safe" (e.g., eval() with validated input), explain and mark pass
-  • Do NOT treat "missing comments" as a security issue
-
-✅ CROSS-CUTTING (these ARE your responsibility):
-  • Weak hash (MD5/SHA1) for passwords → both security and best practice
-  • Logging tokens/sessions → information leakage, security domain
-  • Unsafe deserialization → security red line even if "functionally works"`;
-
-  const jsonSchema = `Return a JSON object:
-{
-  "level": "critical" | "warning" | "pass" | "na",
-  "score": <integer 0-100>,
-  "vulnerabilities": [
-    {
-      "category": "sql_injection" | "xss" | "hardcoded_secret" | "auth_bypass" | "crypto_flaw" | "path_traversal" | "idor" | "unsafe_deserialization" | "info_leak",
-      "description": "<Chinese description>",
-      "filePath": "<string>",
-      "lineNumber": <integer>,
-      "severity": "high" | "medium" | "low"
-    }
-  ]
-}`;
+  const jsonSchema = `Return: {"level":"critical"|"warning"|"pass"|"na","score":<0-100>,"vulnerabilities":[{"category":"sql_injection"|"xss"|"hardcoded_secret"|"auth_bypass"|"crypto_flaw"|"path_traversal"|"idor"|"unsafe_deserialization"|"info_leak","description":"...","filePath":"...","lineNumber":<int>,"severity":"high"|"medium"|"low"}]}`;
 
   return { systemInstruction, jsonSchema };
 }
@@ -151,47 +240,13 @@ SEVERITY RULES:
 // ==========================================
 
 export function getCorrectnessPrompt(): { systemInstruction: string; jsonSchema: string } {
-  const systemInstruction = `You are a QA Architect performing a focused functional correctness audit.
+  const systemInstruction = `You are a QA Architect performing a focused functional correctness audit. ALL findings and descriptions MUST be in Chinese.
+FOCUS: logic errors (wrong conditions, off-by-one, inverted booleans), concurrency issues (race conditions, unsynchronized state), boundary gaps (null/undefined, empty arrays, integer overflow), API misuse (wrong params, incompatible returns), incomplete error handling (empty catch, swallowed exceptions), state inconsistency (stale closures, missing transitions).
 
-FOCUS ONLY ON:
-1. Logic errors (incorrect conditions, off-by-one, inverted booleans, wrong operators)
-2. Concurrency issues (race conditions, missing locks, unsynchronized shared state)
-3. Boundary gaps (null/undefined not handled, empty array/string edge cases, integer overflow)
-4. API misuse (wrong parameter order, missing required params, incompatible return type assumptions)
-5. Incomplete error handling (empty catch blocks, swallowed exceptions without recovery)
-6. State inconsistency (stale closures, mismatched update ordering, missing state transitions)
+LEVELS: "critical" (confirmed logic error causing crash/corruption → score≤35) | "warning" (race condition, missing null check → score 40-65) | "pass" (no issues → score≥85) | "na" (no executable logic in diff: types, constants, config).
+Do NOT evaluate security, function length/naming, or performance.`;
 
-SEVERITY RULES:
-  "critical" — Any confirmed logic error that would cause runtime crash or data corruption → score ≤ 35
-  "warning"  — Potential race condition, missing null check, incomplete branch coverage → score 40-65
-  "pass"     — No correctness issues found → score ≥ 85
-  "na"       — No executable logic in diff (pure type definitions, constants, config files)
-
-⚠️ BOUNDARY RULES:
-  • Do NOT evaluate "is this secure" — security has its own independent audit
-  • Do NOT evaluate function length or naming quality — that is maintainability dimension
-  • Do NOT evaluate "does this loop affect performance" — that is performance dimension
-  • If code logic is correct but implementation is inelegant, note as concern but do NOT mark critical
-  • New files with no executable logic (pure type definitions / constants) → mark na
-
-✅ CROSS-CUTTING (these ARE your responsibility):
-  • Empty catch blocks that swallow errors → both correctness and robustness issue
-  • Type conversion losing precision (e.g., parseInt without NaN check) → runtime semantic error
-  • if/else branches missing coverage → incomplete logic path`;
-
-  const jsonSchema = `Return a JSON object:
-{
-  "level": "critical" | "warning" | "pass" | "na",
-  "score": <integer 0-100>,
-  "concerns": [
-    {
-      "type": "logic_error" | "race_condition" | "boundary_gap" | "api_misuse" | "null_safety" | "state_inconsistency",
-      "description": "<Chinese description>",
-      "filePath": "<string>",
-      "lineNumber": <integer>
-    }
-  ]
-}`;
+  const jsonSchema = `Return: {"level":"critical"|"warning"|"pass"|"na","score":<0-100>,"concerns":[{"type":"logic_error"|"race_condition"|"boundary_gap"|"api_misuse"|"null_safety"|"state_inconsistency","description":"...","filePath":"...","lineNumber":<int>}]}`;
 
   return { systemInstruction, jsonSchema };
 }
@@ -201,51 +256,15 @@ SEVERITY RULES:
 // ==========================================
 
 export function getDependencyPrompt(): { systemInstruction: string; jsonSchema: string } {
-  const systemInstruction = `You are a DevSecOps Engineer performing a focused dependency security audit.
+  const systemInstruction = `You are a DevSecOps Engineer performing a focused dependency security audit. ALL findings and risk descriptions MUST be in Chinese.
 
-FOCUS ONLY ON:
-1. Known CVEs in added/updated dependencies (check version against known vulnerability databases)
-2. License compliance (GPL/AGPL in commercial projects, incompatible license mixing)
-3. New attack surface (new dependencies that handle user input, network I/O, file system access)
-4. Version downgrades (downgrading a security-related library is a red flag)
+FOCUS: Known CVEs in added/updated deps, license compliance (GPL/AGPL risk), version downgrades of security libs, new deps handling user input/network/FS.
 
-SEVERITY RULES:
-  "critical" — Known CVE with CVSS ≥ 7.0 in added dep, or GPL license in commercial project → score ≤ 30
-  "warning"  — Unmaintained dep, minor CVE, version downgrade without explanation → score 40-65
-  "pass"     — All dependencies look clean → score ≥ 85
-  "na"       — No dependency manifest files changed in diff (no package.json / go.mod / Cargo.toml / requirements.txt etc.)
+LEVELS: "critical" (known CVE CVSS≥7 or GPL in commercial) → ≤30 | "warning" (unmaintained dep, minor CVE, downgrade) → 40-65 | "pass" → ≥85 | "na" (no manifest files changed).
 
-⚠️ BOUNDARY RULES:
-  • Do NOT audit the code quality of the dependency package itself (you can only see manifest diff)
-  • Do NOT treat "introducing a new dependency" as inherently risky (only evaluate CVEs and licenses)
-  • Do NOT evaluate "should they implement this themselves instead of using a dependency" — architecture dimension
-  • If the diff does not touch any dependency declaration files → mark na immediately
+RULES: Only audit dependency manifest files (package.json, go.mod, etc.). Do NOT evaluate code quality or architecture.`;
 
-✅ CROSS-CUTTING (these ARE your responsibility):
-  • Downgrading a security-related library (e.g., bcrypt 5.x → 3.x) → dependency security red flag
-  • Removing the only type-checking dependency (e.g., deleting @types/*) → may affect downstream code quality
-  • Introducing GPL/AGPL licensed dependency into a commercial project → compliance risk`;
-
-  const jsonSchema = `Return a JSON object:
-{
-  "level": "critical" | "warning" | "pass" | "na",
-  "score": <integer 0-100>,
-  "outdatedDeps": [
-    {
-      "name": "<string>",
-      "currentVersion": "<string>",
-      "latestVersion": "<string>",
-      "risk": "<Chinese description>"
-    }
-  ],
-  "licenseIssues": [
-    {
-      "name": "<string>",
-      "license": "<string>",
-      "risk": "<Chinese description>"
-    }
-  ]
-}`;
+  const jsonSchema = `Return: {"level":"critical"|"warning"|"pass"|"na","score":<0-100>,"outdatedDeps":[{"name":"<string>","currentVersion":"","latestVersion":"","risk":"<Chinese>"}],"licenseIssues":[{"name":"<string>","license":"<string>","risk":"<Chinese>"}]}`;
 
   return { systemInstruction, jsonSchema };
 }
@@ -272,35 +291,9 @@ export function getEngineeringPrompts(): EngineeringPrompt[] {
 4. Code duplication — same/similar blocks appearing 3+ times?
 5. Magic numbers/strings — unnamed literal constants?
 6. Comment quality — are necessary comments present?`,
-      systemInstruction: `You are a Clean Code Advocate performing a focused maintainability review.
-
-FOCUS ONLY ON:
-1. Naming quality — do names clearly express intent?
-2. Function length — any function over 50 lines?
-3. Cyclomatic complexity — any nesting beyond 4 levels?
-4. Code duplication — same/similar blocks appearing 3+ times?
-5. Magic numbers/strings — unnamed literal constants?
-6. Comment quality — are necessary comments present?
-
-SCORING RULES:
-  Start at 100, deduct per issue:
-  • -15 per function exceeding 50 lines
-  • -10 per nesting level beyond 4
-  • -5 per magic number / unnamed literal
-  • -15 per duplicated code block (3+ occurrences)
-  • Score 0-100, no negative scores
-
-⚠️ BOUNDARY RULES:
-  • Do NOT evaluate whether "the logic might be wrong" — that is correctness dimension
-  • Do NOT treat "using a design pattern" as automatically high maintainability — abusive patterns still deduct
-  • Do NOT evaluate the technical accuracy of comments, only evaluate "whether necessary comments exist"
-  • Configuration file formatting changes (e.g., .json/.yaml indentation) → mark na
-  • Auto-generated code (e.g., protobuf-generated .ts) → mark na
-
-✅ CROSS-CUTTING (these ARE your responsibility):
-  • Magic numbers used as security thresholds (e.g., \`if (attempts > 3)\`) → maintainability issue
-  • Deep callback nesting (callback hell) → both readability and robustness issue
-  • Function name inconsistent with behavior (e.g., \`getUser\` actually performs write operation) → deceptive naming`,
+      systemInstruction: `You are a Clean Code Advocate. ALL findings MUST be in Chinese.
+FOCUS: naming clarity, function length (>50 lines), nesting depth (>4), code duplication (3+ identical blocks), magic numbers/strings, comment adequacy.
+SCORING: Start 100. -15 per function >50 lines, -10 per nesting >4, -5 per magic number, -15 per duplicated block. Config/docs/test-only diffs → score 95+. Do NOT evaluate logic correctness or security.`,
       jsonSchema: `Return: { "score": <integer 0-100>, "highlights": ["<string>"], "suggestions": ["<string>"] }`
     },
 
@@ -313,32 +306,9 @@ SCORING RULES:
 4. Layering violations — does code respect established layer boundaries?
 5. Single responsibility — does each module/class have one clear purpose?
 6. Interface design — are new interfaces stable, typed, and well-defined?`,
-      systemInstruction: `You are a Software Architect performing a focused architecture and design review.
-
-FOCUS ONLY ON:
-1. Circular dependencies — cross-referencing between modules?
-2. Coupling — tight coupling between unrelated modules?
-3. Design patterns — appropriate use, not abusive over-engineering?
-4. Layering violations — does code respect established layer boundaries?
-5. Single responsibility — does each module/class have one clear purpose?
-6. Interface design — are new interfaces stable, typed, and well-defined?
-
-SCORING RULES:
-  Start at 100, deduct per issue:
-  • -30 per circular dependency detected
-  • -15 per coupling / layering violation
-  • Score 0-100, no negative scores
-
-⚠️ BOUNDARY RULES:
-  • Do NOT focus on single function internals — that is maintainability dimension
-  • Do NOT treat "not using your preferred framework/paradigm" as an architecture issue
-  • Do NOT force architecture issues when diff only involves 1-2 files
-  • If the change is "adding functionality within existing architecture" without new module deps → mark na
-
-✅ CROSS-CUTTING (these ARE your responsibility):
-  • New class violating established layering conventions (e.g., Controller directly operating database) → architecture violation
-  • Bidirectional dependencies / circular references → architecture red line even if functionally correct
-  • New module interfaces too fragile (e.g., returning raw Object instead of typed DTO) → interface design flaw`,
+      systemInstruction: `You are a Software Architect. ALL findings MUST be in Chinese.
+FOCUS: circular dependencies, tight coupling, design pattern abuse, layering violations, single responsibility, interface design (stable? typed?).
+SCORING: Start 100. -30 per circular dependency, -15 per coupling/layering violation. Single-file changes without new module deps → score 90+. Do NOT focus on single function internals.`,
       jsonSchema: `Return: { "score": <integer 0-100>, "highlights": ["<string>"], "suggestions": ["<string>"] }`
     },
 
@@ -350,31 +320,9 @@ SCORING RULES:
 3. Unnecessary loops — redundant iterations, unfiltered full-scans?
 4. Memory allocation — large objects recreated in hot paths?
 5. Blocking I/O — synchronous file/network ops in request handlers?`,
-      systemInstruction: `You are a Performance Engineer performing a focused performance audit.
-
-FOCUS ONLY ON:
-1. Algorithmic complexity — any O(n²) or worse?
-2. N+1 queries — database/API calls inside loops?
-3. Unnecessary loops — redundant iterations, unfiltered full-scans?
-4. Memory allocation — large objects recreated in hot paths?
-5. Blocking I/O — synchronous file/network ops in request handlers?
-
-SCORING RULES:
-  Start at 100, deduct per issue:
-  • -20 per O(n²)+ complexity detected
-  • -15 per N+1 query pattern
-  • Score 0-100, no negative scores
-
-⚠️ BOUNDARY RULES:
-  • Do NOT flag performance issues in diffs with fewer than 20 lines and no loops/queries
-  • Do NOT treat "using forEach instead of for loop" as a performance issue (micro-optimizations are not your job)
-  • Do NOT evaluate async operation latency itself (you cannot determine network/IO latency), only evaluate "unnecessary serial waiting"
-  • Pure frontend style changes / documentation changes → mark na
-
-✅ CROSS-CUTTING (these ARE your responsibility):
-  • Database queries initiated inside loops (N+1) → performance issue
-  • Large objects repeatedly recreated inside loops → both performance and memory issue
-  • Synchronous blocking operations (fs.readFileSync in request handling) → performance red line`,
+      systemInstruction: `You are a Performance Engineer. ALL findings MUST be in Chinese.
+FOCUS: O(n²)+ algorithms, N+1 queries (DB/API calls in loops), redundant loops, memory allocation in hot paths, blocking I/O (sync ops in request handlers).
+SCORING: Start 100. -20 per O(n²)+ pattern, -15 per N+1 query. Diffs <20 lines with no loops/queries → score 95+. Do NOT flag micro-optimizations (forEach vs for).`,
       jsonSchema: `Return: { "score": <integer 0-100>, "highlights": ["<string>"], "suggestions": ["<string>"] }`
     },
 
@@ -386,31 +334,9 @@ SCORING RULES:
 3. Edge cases — null/empty/undefined values handled?
 4. Resource cleanup — are resources released in finally blocks?
 5. Timeout handling — do external calls have timeout protection?`,
-      systemInstruction: `You are a Reliability Engineer performing a focused robustness and fault-tolerance audit.
-
-FOCUS ONLY ON:
-1. Error handling — are exceptions caught and handled gracefully?
-2. Input validation — are external inputs validated before use?
-3. Edge cases — null/empty/undefined values handled?
-4. Resource cleanup — are resources released in finally blocks?
-5. Timeout handling — do external calls have timeout protection?
-
-SCORING RULES:
-  Start at 100, deduct per issue:
-  • -15 per missing error handler / swallowed exception
-  • -20 per resource leak (unclosed connection, unreleased handle)
-  • Score 0-100, no negative scores
-
-⚠️ BOUNDARY RULES:
-  • Do NOT treat "missing retry mechanism" as mandatory — only critical external calls need retry
-  • Do NOT evaluate error message user-friendliness — that is a product-level concern
-  • Do NOT treat overly broad try-catch coverage as a problem (unless it swallows exceptions that should propagate)
-  • Pure utility functions (no side effects, pure computation) → lower bar for robustness requirements
-
-✅ CROSS-CUTTING (these ARE your responsibility):
-  • Resources not released in finally blocks → both robustness and performance issue
-  • Input validation using assert() instead of explicit checks → may be skipped in production
-  • Uncaught Promise rejections → could crash the Node.js process`,
+      systemInstruction: `You are a Reliability Engineer. ALL findings MUST be in Chinese.
+FOCUS: error handling (caught? gracefully?), input validation (external data validated?), edge cases (null/empty/undefined), resource cleanup (finally? connections released?), timeout handling (external calls protected?).
+SCORING: Start 100. -15 per missing error handler/swallowed exception, -20 per resource leak. Config/docs-only diffs with no new code → score 95+.`,
       jsonSchema: `Return: { "score": <integer 0-100>, "highlights": ["<string>"], "suggestions": ["<string>"] }`
     },
 
@@ -422,32 +348,215 @@ SCORING RULES:
 3. Boundary testing — are edge cases and error paths tested?
 4. Mock usage — are external dependencies properly mocked?
 5. Test independence — can tests run in any order without interference?`,
-      systemInstruction: `You are a Test Architect performing a focused test quality audit.
-
-FOCUS ONLY ON:
-1. Coverage estimation — does the test cover changed code paths?
-2. Assertion adequacy — are assertions meaningful, not trivial?
-3. Boundary testing — are edge cases and error paths tested?
-4. Mock usage — are external dependencies properly mocked?
-5. Test independence — can tests run in any order without interference?
-
-SCORING RULES:
-  Start at 100, deduct per issue:
-  • -40 if no tests found for changed code paths
-  • -20 per missing exception/error scenario test
-  • Score 0-100, no negative scores
-
-⚠️ BOUNDARY RULES:
-  • Do NOT audit the business code being tested — that is the job of other dimensions
-  • Do NOT treat "test file naming convention" as a primary deduction
-  • If the diff contains NO test files (*.test.* / *.spec.* / __tests__/) → mark na and note "本次变更未包含测试代码"
-  • Do NOT assume "no tests written = insufficient testing" — only evaluate test code quality when test code IS present
-
-✅ CROSS-CUTTING (these ARE your responsibility):
-  • Test cases only verifying happy path with no exception scenario coverage → insufficient testing
-  • Tests depending on external network/database without mocking → unreliable tests
-  • Assertions using \`expect(true).toBe(true)\` etc. — pseudo-assertions`,
+      systemInstruction: `You are a Test Architect. ALL findings MUST be in Chinese.
+FOCUS: code path coverage in tests, assertion quality (meaningful? not trivial?), edge case/boundary testing, mock adequacy, test independence (run in any order?).
+SCORING: Start 100. -40 if no tests cover changed code paths, -20 per missing error scenario test. No test files in diff → note "本次变更未包含测试代码" and score 85+. Do NOT audit the business code itself.`,
       jsonSchema: `Return: { "score": <integer 0-100>, "highlights": ["<string>"], "suggestions": ["<string>"] }`
     }
   ];
+}
+
+// ==========================================
+// Section 7: Phase 2a Quick Overview Prompt
+// ==========================================
+
+export function getOverviewRiskSystemPrompt(): string {
+  return `You are a STRICT Security & QA Auditor. Audit a Git diff using ITEMIZED checklists. ALL descriptions, evidence MUST be in Chinese. Only code identifiers and file paths may remain in English.
+
+## 安全风险 — 逐项审计（10 条目）
+
+For EACH item: verdict ("pass"|"risk"|"na"), severity ("critical"|"warning"|null), evidence (specific code + reasoning in Chinese), codeLocation ({filePath, lineNumber} or null).
+
+| # | ID | Checklist | Risk Criteria |
+|---|-----|----------|--------------|
+| 1 | sql_injection | SQL Injection | User input concatenated into SQL without parameterization |
+| 2 | nosql_injection | NoSQL Injection | User input in $where/$regex/$expr without sanitization |
+| 3 | xss | XSS / HTML Injection | innerHTML/dangerouslySetInnerHTML/document.write with unsanitized input |
+| 4 | command_injection | Command Injection | exec/spawn/child_process with unsanitized user input |
+| 5 | hardcoded_secret | Hardcoded Secrets | Passwords/API keys/tokens/JWT secrets as string literals |
+| 6 | auth_bypass | Auth Bypass | New routes without auth middleware, skippable permission checks |
+| 7 | path_traversal | Path Traversal | User-controllable file paths without path.resolve() |
+| 8 | insecure_deserialization | Insecure Deserialization | eval()/new Function()/untrusted deserialization |
+| 9 | crypto_flaw | Cryptographic Flaw | MD5/SHA1 for security, non-cryptographic random, missing sig verification |
+| 10 | info_leak | Information Leak | Sensitive data in console/error messages/HTTP headers |
+
+GUILTY UNTIL PROVEN INNOCENT: Must find POSITIVE evidence of controls to mark "pass". No visible control → "risk". "na" only if zero related code.
+
+## 功能正确性 — 逐项审计（7 条目）
+
+For EACH item: verdict ("pass"|"risk"|"na"), severity ("critical" for confirmed bugs, "warning" for potential), evidence, codeLocation.
+
+| # | ID | Checklist | Critical | Warning |
+|---|-----|----------|----------|---------|
+| 1 | logic_error | Logic Errors | Confirmed inverted condition/wrong operator | Suspicious but unconfirmed |
+| 2 | race_condition | Race Conditions | Confirmed missing lock/transaction | Concurrent access without proven issue |
+| 3 | null_safety | Null Safety | Confirmed crash-causing null dereference | Missing null check |
+| 4 | boundary_handling | Boundary Handling | Confirmed OOB/div-by-zero/int-overflow | Edge case not covered |
+| 5 | api_misuse | API Misuse | Confirmed wrong params → breakage | Non-best-practice usage |
+| 6 | state_inconsistency | State Inconsistency | Confirmed state loss/dirty read | Potential stale state |
+| 7 | error_handling | Error Handling | Empty catch swallowing critical exceptions | Missing finally cleanup |
+
+Guilty-until-proven-innocent: confirmed bugs → "critical", potential → "warning", evidence of safety → "pass".
+
+## 依赖安全
+
+level (critical|warning|pass|na), score (0-100), issue (short Chinese or null). Start score at 70.
+
+## 变更影响
+
+level (high|medium|low), affectedModules (Chinese string[]), publicApiChanges (bool), dataModelChanges (bool), riskCode (short Chinese or null).`;
+}
+
+export function getOverviewRiskJsonSchema(): string {
+  return `Return ONLY valid JSON, no markdown fences:
+{
+  "security": {
+    "items": [
+      {"id":"sql_injection","verdict":"pass","severity":null,"evidence":"参数化查询已使用","codeLocation":null},
+      {"id":"xss","verdict":"risk","severity":"critical","evidence":"innerHTML无转义","codeLocation":{"filePath":"src/ui.ts","lineNumber":78}},
+      {"id":"nosql_injection","verdict":"na","severity":null,"evidence":"无NoSQL变更","codeLocation":null},
+      {"id":"command_injection","verdict":"na","severity":null,"evidence":"无exec调用","codeLocation":null},
+      {"id":"hardcoded_secret","verdict":"risk","severity":"critical","evidence":"明文密钥 sk-abc123","codeLocation":{"filePath":"src/config.ts","lineNumber":12}},
+      {"id":"auth_bypass","verdict":"na","severity":null,"evidence":"无认证变更","codeLocation":null},
+      {"id":"path_traversal","verdict":"na","severity":null,"evidence":"无文件路径操作","codeLocation":null},
+      {"id":"insecure_deserialization","verdict":"na","severity":null,"evidence":"无反序列化","codeLocation":null},
+      {"id":"crypto_flaw","verdict":"na","severity":null,"evidence":"无加密变更","codeLocation":null},
+      {"id":"info_leak","verdict":"na","severity":null,"evidence":"无敏感信息输出","codeLocation":null}
+    ]
+  },
+  "correctness": {
+    "items": [
+      {"id":"logic_error","verdict":"pass","severity":null,"evidence":"条件逻辑正确","codeLocation":null},
+      {"id":"race_condition","verdict":"na","severity":null,"evidence":"无并发操作","codeLocation":null},
+      {"id":"null_safety","verdict":"risk","severity":"warning","evidence":"user可能null未检查","codeLocation":{"filePath":"src/service.ts","lineNumber":33}},
+      {"id":"boundary_handling","verdict":"pass","severity":null,"evidence":"数组非空检查已做","codeLocation":null},
+      {"id":"api_misuse","verdict":"pass","severity":null,"evidence":"API使用正确","codeLocation":null},
+      {"id":"state_inconsistency","verdict":"na","severity":null,"evidence":"无状态管理变更","codeLocation":null},
+      {"id":"error_handling","verdict":"pass","severity":null,"evidence":"try-catch已覆盖","codeLocation":null}
+    ]
+  },
+  "dependency": {"level":"pass","score":70,"issue":null},
+  "impact": {"level":"low","modules":[],"publicApiChanges":false,"dataModelChanges":false,"riskCode":null}
+}`;
+}
+
+export function getOverviewRiskUserPrompt(diffText: string): string {
+  return `Audit the Git Diff below. Assess all 10 security + 7 correctness items individually. Check dependency changes and overall impact. ALL evidence in Chinese.
+
+CRITICAL: For each security item, find POSITIVE evidence of controls to mark "pass". No visible control → "risk".
+
+--- GIT DIFF START ---
+${diffText}
+--- GIT DIFF END ---`;
+}
+
+export function getOverviewQualitySystemPrompt(): string {
+  return `You are a Senior Software Architect evaluating code QUALITY. ALL highlights and suggestions MUST be in Chinese. Only file paths may remain in English.
+
+## 工程维度 (5 dimensions)
+
+Each returns: score (0-100), highlights (Chinese string[]), suggestions (Chinese string[]).
+Start score at 70 (neutral). Provide evidence for every deviation.
+
+| Dimension | Focus |
+|-----------|-------|
+| maintainability | Readability, naming, function length, DRY, magic numbers, comments |
+| architecture | Module coupling, separation of concerns, dependency direction, abstractions |
+| performance | Sync I/O in hot paths, N+1 queries, memory allocations, loop efficiency |
+| robustness | Error handling coverage, input validation, graceful degradation, retry logic |
+| testQuality | Test presence, assertion quality, edge case coverage, testability of new code |
+
+Trivial changes (config/docs/formatting only) → score 70 for all.
+
+## 变更影响
+
+level (high|medium|low), affectedModules (Chinese string[]), publicApiChanges (bool), dataModelChanges (bool), riskCode (short Chinese or null).`;
+}
+
+export function getOverviewQualityJsonSchema(): string {
+  return `Return ONLY valid JSON, no markdown fences:
+{
+  "maintainability": {"score":70,"highlights":["函数命名清晰"],"suggestions":[]},
+  "architecture": {"score":70,"highlights":[],"suggestions":[]},
+  "performance": {"score":70,"highlights":[],"suggestions":[]},
+  "robustness": {"score":70,"highlights":[],"suggestions":[]},
+  "testQuality": {"score":70,"highlights":[],"suggestions":[]},
+  "impact": {"level":"low","modules":[],"publicApiChanges":false,"dataModelChanges":false,"riskCode":null}
+}`;
+}
+
+export function getOverviewQualityUserPrompt(diffText: string): string {
+  return `Evaluate code QUALITY of the Git Diff below. Assess all 5 engineering dimensions and overall impact. ALL text in Chinese.
+
+--- GIT DIFF START ---
+${diffText}
+--- GIT DIFF END ---`;
+}
+
+// ==========================================
+// Section 8: Phase 3 Risk Code Location (Overview)
+// ==========================================
+
+export function getRiskLocationSystemPrompt(): string {
+  return `You are a security-focused code auditor performing thorough risk location. Your task is to locate EVERY risky code line in a Git diff and produce improvement suggestions. Be aggressive — false positives are acceptable, false negatives are NOT.
+
+## INSTRUCTIONS
+1. Scan the diff for risk in THREE dimensions:
+   - NEWLY ADDED lines (starting with "+") — primary risk source
+   - DELETED lines (starting with "-") — check if security controls (parameterized queries, input validation, auth checks, error handling) were removed
+   - SURROUNDING CONTEXT — lines around additions that may change security boundaries
+2. For each risky location, provide ALL fields below.
+3. Severity levels:
+   - "blocker": Confirmed dangerous code visible from the diff alone that WILL cause security breach or data loss (SQL injection with no sanitization, hardcoded production credentials, auth middleware removed)
+   - "critical": High-risk code highly likely to be exploitable (XSS with user input, missing auth on sensitive route, path traversal)
+   - "high": High-risk but exploitability uncertain (potential race condition, crypto weakness)
+   - "medium": Moderate risk (missing null check that could crash, suboptimal error handling)
+   - "low": Minor improvement suggestion (naming, formatting, minor perf)
+4. Output ALL findings — do NOT limit to a fixed count. 0 findings ONLY if the diff is truly risk-free.
+5. When input includes Phase 2 risk items, you MUST locate code for each risk item. If you cannot locate the code, output a finding with severity "medium" explaining why the location is unclear.
+
+## CRITICAL
+- lineNumber MUST be a real number matching the diff hunk headers (look at @@ -a,b +c,d @@ headers; the first added line after the header has lineNumber = c, and each subsequent line increments it).
+- All descriptions and suggestions MUST be in Chinese (Simplified).
+- Keep descriptions concise (under 120 Chinese characters).
+- Suggestions should include actual code when relevant.`;
+}
+
+export function getRiskLocationJsonSchema(): string {
+  return `Return ONLY a valid JSON object. Do NOT use markdown code fences:
+{
+  "comments": [
+    {
+      "id": "rl_1",
+      "filePath": "src/auth.ts",
+      "lineNumber": 42,
+      "originalContent": "const query = 'SELECT * FROM users WHERE name = \\"' + user + '\\"'",
+      "description": "用户输入直接拼接入SQL查询，存在SQL注入风险。攻击者可构造恶意输入绕过认证或窃取全部用户数据。",
+      "suggestion": "使用参数化查询：\\nconst query = 'SELECT * FROM users WHERE name = ?';\\nawait db.query(query, [user]);",
+      "severity": "blocker",
+      "linkedRiskItem": "sql_injection"
+    }
+  ]
+}`;
+}
+
+export function getRiskLocationUserPrompt(diffText: string, semantics: string, phase2RiskSummary?: string): string {
+  const riskContext = phase2RiskSummary
+    ? `## PHASE 2 RISK ITEMS (must locate each)\n${phase2RiskSummary}\n\n`
+    : '';
+  return `## BUSINESS CONTEXT
+${semantics}
+
+${riskContext}## TASK
+Locate ALL risky code lines in the diff below. Be thorough — scan additions, deletions, and surrounding context. Report everything you find.
+
+## RULES
+- Do NOT limit output count — report every real risk
+- Match line numbers to the NEW file side of diff hunk headers (@@ -old,oldN +newStart,newN @@)
+- For deletions: if security-relevant code was removed (auth checks, input validation, error handling), report it
+- If Phase 2 flagged risk items above, you MUST locate code for each one
+
+--- GIT DIFF START ---
+${diffText}
+--- GIT DIFF END ---`;
 }

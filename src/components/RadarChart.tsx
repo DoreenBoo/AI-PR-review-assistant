@@ -1,22 +1,27 @@
 import React, { useMemo } from "react";
 import { motion } from "motion/react";
 
+interface DimSource {
+  _inferred?: boolean;
+  _source?: 'local' | 'overview' | 'deep';
+}
+
 interface RadarChartProps {
-  security: { score: number } | null;
-  correctness: { score: number } | null;
-  dependency: { score: number } | null;
-  maintainability: { score: number } | null;
-  architecture: { score: number } | null;
-  performance: { score: number } | null;
-  robustness: { score: number } | null;
-  testQuality: { score: number } | null;
+  security: ({ score: number } & DimSource) | null;
+  correctness: ({ score: number } & DimSource) | null;
+  dependency: ({ score: number } & DimSource) | null;
+  maintainability: ({ score: number } & DimSource) | null;
+  architecture: ({ score: number } & DimSource) | null;
+  performance: ({ score: number } & DimSource) | null;
+  robustness: ({ score: number } & DimSource) | null;
+  testQuality: ({ score: number } & DimSource) | null;
   overallScore: number | null;
   highlightedDimension: string | null;
 }
 
 const CX = 130;
 const CY = 130;
-const R = 85;
+const R = 70;
 
 function polarToCartesian(angleDeg: number, radius: number) {
   const rad = (angleDeg - 90) * Math.PI / 180;
@@ -46,6 +51,13 @@ function getPointColor(score: number): string {
   if (score < 50) return "#ef4444";
   if (score < 70) return "#f59e0b";
   return "#10b981";
+}
+
+function sourceLabel(data: DimSource | null): string {
+  if (!data || data._inferred) return "";
+  if (data._source === 'overview') return "快审";
+  if (data._source === 'deep') return "深检";
+  return "";
 }
 
 export default function RadarChart({
@@ -111,8 +123,8 @@ export default function RadarChart({
   const hasAnyData = useMemo(() => scores.some((s) => s > 0), [scores]);
 
   return (
-    <div className="w-[280px] h-[280px] flex items-center justify-center">
-      <svg viewBox="0 0 260 260" className="w-[280px] h-[280px]">
+    <div className="w-[320px] h-[320px] flex items-center justify-center">
+      <svg viewBox="0 0 260 260" className="w-[320px] h-[320px]">
         <polygon
           points={hexagonPoints(R)}
           fill="none"
@@ -185,7 +197,7 @@ export default function RadarChart({
               <motion.circle
                 cx={p.x}
                 cy={p.y}
-                r={isHighlighted ? 5 : 3.5}
+                r={isHighlighted ? 5 : 4}
                 fill={color}
                 opacity={opacity}
                 initial={{ opacity: 0 }}
@@ -197,18 +209,34 @@ export default function RadarChart({
         })}
 
         {DIMENSIONS.map((d) => {
-          const { x, y } = polarToCartesian(d.angle, R + 16);
+          const { x, y } = polarToCartesian(d.angle, R + 24);
+          const dimData = propsMap[d.key as keyof typeof propsMap];
+          const srcLabel = sourceLabel(dimData);
+          const labelY = srcLabel ? y - 6 : y;
+          const subY = srcLabel ? y + 10 : y;
           return (
-            <text
-              key={d.key}
-              x={x}
-              y={y}
-              textAnchor="middle"
-              dominantBaseline="central"
-              className="fill-zinc-500 text-[10px]"
-            >
-              {d.label}
-            </text>
+            <g key={d.key}>
+              <text
+                x={x}
+                y={labelY}
+                textAnchor="middle"
+                dominantBaseline="central"
+                className="fill-zinc-400 text-[11px] font-bold"
+              >
+                {d.label}
+              </text>
+              {srcLabel && (
+                <text
+                  x={x}
+                  y={subY}
+                  textAnchor="middle"
+                  dominantBaseline="central"
+                  className={srcLabel === "深检" ? "fill-emerald-400 text-[9px]" : "fill-yellow-400 text-[9px]"}
+                >
+                  {srcLabel}
+                </text>
+              )}
+            </g>
           );
         })}
 

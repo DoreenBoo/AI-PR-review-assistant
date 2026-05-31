@@ -6,5 +6,4 @@ coverage/
 *.log
 .env*
 !.env.example
-.worktrees/
 业务流程实现文档.md

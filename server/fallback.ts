@@ -1,7 +1,7 @@
 import {
   SecurityAudit, CorrectnessAudit, DependencyAudit,
   EngineeringScore, ChangeImpact,
-  SecurityVulnerability, CorrectnessConcern
+  SecurityVulnerability, CorrectnessConcern, RiskItem
 } from "../src/types";
 
 function getFilePaths(diffText: string): string[] {
@@ -41,41 +41,87 @@ function isBusinessCode(paths: string[]): boolean {
   return false;
 }
 
+function makeSecurityItems(): RiskItem[] {
+  return [
+    { id: 'sql_injection', verdict: 'na', severity: null, evidence: '无SQL操作' },
+    { id: 'nosql_injection', verdict: 'na', severity: null, evidence: '无NoSQL操作' },
+    { id: 'xss', verdict: 'na', severity: null, evidence: '无HTML输出操作' },
+    { id: 'command_injection', verdict: 'na', severity: null, evidence: '无命令执行操作' },
+    { id: 'hardcoded_secret', verdict: 'na', severity: null, evidence: '无硬编码密钥' },
+    { id: 'auth_bypass', verdict: 'na', severity: null, evidence: '无认证变更' },
+    { id: 'path_traversal', verdict: 'na', severity: null, evidence: '无文件路径操作' },
+    { id: 'insecure_deserialization', verdict: 'na', severity: null, evidence: '无反序列化操作' },
+    { id: 'crypto_flaw', verdict: 'na', severity: null, evidence: '无加密操作' },
+    { id: 'info_leak', verdict: 'na', severity: null, evidence: '无敏感信息输出' },
+  ];
+}
+
+function updateItem(items: RiskItem[], id: string, severity: 'critical' | 'warning', evidence: string) {
+  const item = items.find(i => i.id === id);
+  if (item) {
+    item.verdict = 'risk';
+    item.severity = severity;
+    item.evidence = evidence;
+  }
+}
+
+function calculateFallbackScore(items: RiskItem[]): number {
+  let score = 70;
+  for (const item of items) {
+    if (item.verdict === 'risk') {
+      if (item.severity === 'critical') score -= 25;
+      else score -= 10;
+    }
+  }
+  return Math.max(0, Math.min(100, Math.round(score)));
+}
+
+function itemLevel(score: number): 'critical' | 'warning' | 'pass' {
+  if (score < 40) return 'critical';
+  if (score < 65) return 'warning';
+  return 'pass';
+}
+
 export function inferSecurityFromDiff(diffText: string): SecurityAudit {
   const paths = getFilePaths(diffText);
   if (!isBusinessCode(paths) || diffText.trim().length === 0) {
-    return { level: 'na', score: 100, vulnerabilities: [], _inferred: true };
+    const items = makeSecurityItems();
+    return { level: 'na', score: 100, items, vulnerabilities: [], traces: [], _inferred: true, _source: 'local' };
   }
 
   const vulnerabilities: SecurityVulnerability[] = [];
+  const items = makeSecurityItems();
   const lines = diffText.split('\n');
   let currentFile = '';
   let currentLineNum = 0;
+  let contextLines: string[] = [];
 
-  const highRiskPatterns: { pattern: RegExp; category: SecurityVulnerability['category'] }[] = [
-    { pattern: /\.executeRaw\s*\(/i, category: 'sql_injection' },
-    { pattern: /\bexec\s*\(\s*['"`]/i, category: 'sql_injection' },
-    { pattern: /\$\{.*(?:username|password|query|sql|table)\}/i, category: 'sql_injection' },
-    { pattern: /password\s*[=:]\s*['"`][^'"`]{3,}['"`](?!\s*[,;\)]?\s*(?:from|import|require))/i, category: 'hardcoded_secret' },
-    { pattern: /api[_-]?key\s*[=:]\s*['"`][^'"`]{8,}['"`]/i, category: 'hardcoded_secret' },
-    { pattern: /secret\s*[=:]\s*['"`][^'"`]{4,}['"`]/i, category: 'hardcoded_secret' },
-    { pattern: /token\s*[=:]\s*['"`][^'"`]{8,}['"`]/i, category: 'hardcoded_secret' },
-    { pattern: /access[_-]?key\s*[=:]\s*['"`][^'"`]{8,}['"`]/i, category: 'hardcoded_secret' },
-    { pattern: /jwt\.sign\s*\(\s*[^,)]*,\s*['"`][^'"`]{4,}['"`]/i, category: 'hardcoded_secret' },
-    { pattern: /\.innerHTML\s*=/i, category: 'xss' },
-    { pattern: /dangerouslySetInnerHTML/i, category: 'xss' },
-    { pattern: /document\.write\s*\(/i, category: 'xss' },
-    { pattern: /eval\s*\(/i, category: 'xss' },
-    { pattern: /\bFunction\s*\(/i, category: 'xss' },
-    { pattern: /new\s+Function\s*\(/i, category: 'xss' },
+  const highRiskPatterns: { pattern: RegExp; itemId: string; category: SecurityVulnerability['category'] }[] = [
+    { pattern: /\.executeRaw\s*\(/i, itemId: 'sql_injection', category: 'sql_injection' },
+    { pattern: /\bexec\s*\(\s*['"`]/i, itemId: 'sql_injection', category: 'sql_injection' },
+    { pattern: /\$\{.*(?:username|password|query|sql|table)\}/i, itemId: 'sql_injection', category: 'sql_injection' },
+    { pattern: /password\s*[=:]\s*['"`][^'"`]{3,}['"`](?!\s*[,;\)]?\s*(?:from|import|require))/i, itemId: 'hardcoded_secret', category: 'hardcoded_secret' },
+    { pattern: /api[_-]?key\s*[=:]\s*['"`][^'"`]{8,}['"`]/i, itemId: 'hardcoded_secret', category: 'hardcoded_secret' },
+    { pattern: /secret\s*[=:]\s*['"`][^'"`]{4,}['"`]/i, itemId: 'hardcoded_secret', category: 'hardcoded_secret' },
+    { pattern: /token\s*[=:]\s*['"`][^'"`]{8,}['"`]/i, itemId: 'hardcoded_secret', category: 'hardcoded_secret' },
+    { pattern: /access[_-]?key\s*[=:]\s*['"`][^'"`]{8,}['"`]/i, itemId: 'hardcoded_secret', category: 'hardcoded_secret' },
+    { pattern: /jwt\.sign\s*\(\s*[^,)]*,\s*['"`][^'"`]{4,}['"`]/i, itemId: 'hardcoded_secret', category: 'hardcoded_secret' },
+    { pattern: /\.innerHTML\s*=/i, itemId: 'xss', category: 'xss' },
+    { pattern: /dangerouslySetInnerHTML/i, itemId: 'xss', category: 'xss' },
+    { pattern: /document\.write\s*\(/i, itemId: 'xss', category: 'xss' },
+    { pattern: /eval\s*\(/i, itemId: 'insecure_deserialization', category: 'xss' },
+    { pattern: /\bFunction\s*\(/i, itemId: 'insecure_deserialization', category: 'xss' },
+    { pattern: /new\s+Function\s*\(/i, itemId: 'insecure_deserialization', category: 'xss' },
+    { pattern: /\$where\s*:/, itemId: 'nosql_injection', category: 'nosql_injection' },
+    { pattern: /\$regex\s*:/, itemId: 'nosql_injection', category: 'nosql_injection' },
   ];
 
-  const mediumRiskPatterns: { pattern: RegExp; category: SecurityVulnerability['category'] }[] = [
-    { pattern: /console\.(?:log|debug|info)\([^)]*(?:password|secret|token|key|credential)/i, category: 'info_leak' },
-    { pattern: /md5\s*\(/i, category: 'crypto_flaw' },
-    { pattern: /sha1\s*\(/i, category: 'crypto_flaw' },
-    { pattern: /MD5\s*\.?/i, category: 'crypto_flaw' },
-    { pattern: /\.createHash\s*\(\s*['"`](?:md5|sha1)['"`]\s*\)/i, category: 'crypto_flaw' },
+  const mediumRiskPatterns: { pattern: RegExp; itemId: string; category: SecurityVulnerability['category'] }[] = [
+    { pattern: /console\.(?:log|debug|info)\([^)]*(?:password|secret|token|key|credential)/i, itemId: 'info_leak', category: 'info_leak' },
+    { pattern: /md5\s*\(/i, itemId: 'crypto_flaw', category: 'crypto_flaw' },
+    { pattern: /sha1\s*\(/i, itemId: 'crypto_flaw', category: 'crypto_flaw' },
+    { pattern: /MD5\s*\.?/i, itemId: 'crypto_flaw', category: 'crypto_flaw' },
+    { pattern: /\.createHash\s*\(\s*['"`](?:md5|sha1)['"`]\s*\)/i, itemId: 'crypto_flaw', category: 'crypto_flaw' },
   ];
 
   for (const line of lines) {
@@ -83,6 +129,7 @@ export function inferSecurityFromDiff(diffText: string): SecurityAudit {
       const match = line.match(/b\/(.+)$/);
       currentFile = match ? match[1] : '';
       currentLineNum = 0;
+      contextLines = [];
       continue;
     }
     if (line.startsWith('@@ -')) {
@@ -92,29 +139,35 @@ export function inferSecurityFromDiff(diffText: string): SecurityAudit {
     }
     if (line.startsWith(' ') || line.startsWith('-')) {
       if (line.startsWith(' ')) currentLineNum++;
+      contextLines.push(line);
+      if (contextLines.length > 5) contextLines.shift();
       continue;
     }
     if (line.startsWith('+')) {
       currentLineNum++;
       const contentWithoutPrefix = line.slice(1);
+      contextLines.push(contentWithoutPrefix);
+      if (contextLines.length > 5) contextLines.shift();
 
-      for (const { pattern, category } of highRiskPatterns) {
+      for (const { pattern, itemId, category } of highRiskPatterns) {
         if (pattern.test(line) || pattern.test(contentWithoutPrefix)) {
-          const severity = (category === 'sql_injection' || category === 'hardcoded_secret') ? 'high' : 'medium';
+          const sev = (category === 'sql_injection' || category === 'hardcoded_secret') ? 'critical' as const : 'critical' as const;
+          updateItem(items, itemId, sev, `本地检测: ${getChineseDescription(category)}`);
           vulnerabilities.push({
             category,
             description: getChineseDescription(category),
             filePath: currentFile,
             lineNumber: currentLineNum,
-            severity,
+            severity: (category === 'sql_injection' || category === 'hardcoded_secret') ? 'high' : 'medium',
           });
           break;
         }
       }
 
-      for (const { pattern, category } of mediumRiskPatterns) {
+      for (const { pattern, itemId, category } of mediumRiskPatterns) {
         if ((pattern.test(line) || pattern.test(contentWithoutPrefix)) &&
             !vulnerabilities.some(v => v.filePath === currentFile && v.lineNumber === currentLineNum)) {
+          updateItem(items, itemId, 'warning', `本地检测: ${getChineseDescription(category)}`);
           vulnerabilities.push({
             category,
             description: getChineseDescription(category),
@@ -125,27 +178,41 @@ export function inferSecurityFromDiff(diffText: string): SecurityAudit {
           break;
         }
       }
+
+      const ctx = contextLines.join(' ');
+      if ((line.includes('exec(') || line.includes('spawn(')) && (line.includes('req.') || line.includes('${'))) {
+        updateItem(items, 'command_injection', 'critical', `本地检测: 可能的命令注入 - ${contentWithoutPrefix.trim()}`);
+      }
+      if (line.includes('path.join') && (ctx.includes('req.') || ctx.includes('params') || ctx.includes('query'))) {
+        updateItem(items, 'path_traversal', 'warning', `本地检测: 用户输入参与文件路径操作 - ${contentWithoutPrefix.trim()}`);
+      }
+      if (line.includes('fs.readFile') && (ctx.includes('req.') || ctx.includes('params') || ctx.includes('query'))) {
+        updateItem(items, 'path_traversal', 'warning', `本地检测: 用户输入参与文件读取 - ${contentWithoutPrefix.trim()}`);
+      }
+      if (line.includes('JSON.parse') && (ctx.includes('req.body') || ctx.includes('req.params') || ctx.includes('req.query'))) {
+        updateItem(items, 'insecure_deserialization', 'warning', `本地检测: 不可信数据反序列化 - ${contentWithoutPrefix.trim()}`);
+      }
     }
   }
 
-  const hasHigh = vulnerabilities.some(v => v.severity === 'high');
-  const hasMedium = vulnerabilities.some(v => v.severity === 'medium');
+  const score = calculateFallbackScore(items);
+  const level = itemLevel(score);
 
-  if (vulnerabilities.length === 0) {
-    return { level: 'pass', score: 90, vulnerabilities: [], _inferred: true };
-  }
-  if (hasHigh) {
-    return { level: 'critical', score: 25, vulnerabilities, _inferred: true };
-  }
-  if (hasMedium) {
-    return { level: 'warning', score: 55, vulnerabilities, _inferred: true };
-  }
-  return { level: 'pass', score: 75, vulnerabilities, _inferred: true };
+  return { level, score, items, vulnerabilities, traces: [], _inferred: true, _source: 'local' };
 }
 
 export function inferCorrectnessFromDiff(diffText: string): CorrectnessAudit {
   const lines = diffText.split('\n');
   const concerns: CorrectnessConcern[] = [];
+  const items: RiskItem[] = [
+    { id: 'logic_error', verdict: 'na', severity: null, evidence: '未检测到逻辑错误' },
+    { id: 'race_condition', verdict: 'na', severity: null, evidence: '未检测到竞态条件' },
+    { id: 'null_safety', verdict: 'na', severity: null, evidence: '未检测到空安全问题' },
+    { id: 'boundary_handling', verdict: 'na', severity: null, evidence: '未检测到边界问题' },
+    { id: 'api_misuse', verdict: 'na', severity: null, evidence: '未检测到API误用' },
+    { id: 'state_inconsistency', verdict: 'na', severity: null, evidence: '未检测到状态不一致' },
+    { id: 'error_handling', verdict: 'na', severity: null, evidence: '未检测到错误处理缺陷' },
+  ];
   let currentFile = '';
   let currentLineNum = 0;
 
@@ -164,6 +231,7 @@ export function inferCorrectnessFromDiff(diffText: string): CorrectnessAudit {
             lineNumber: ri.line,
           });
         }
+        updateItem(items, 'logic_error', 'warning', '删除了return语句');
         removedReturnIndices.length = 0;
       }
       const match = line.match(/b\/(.+)$/);
@@ -201,6 +269,7 @@ export function inferCorrectnessFromDiff(diffText: string): CorrectnessAudit {
           filePath: currentFile,
           lineNumber: currentLineNum,
         });
+        updateItem(items, 'error_handling', 'warning', '空的catch块吞没异常');
       }
 
       if (/(?:parseInt|parseFloat|Number)\s*\([^)]*\)\s*(?!.*(?:isNaN|Number\.isNaN|!isNaN|isFinite|===|!==))/.test(content)) {
@@ -211,6 +280,7 @@ export function inferCorrectnessFromDiff(diffText: string): CorrectnessAudit {
             filePath: currentFile,
             lineNumber: currentLineNum,
           });
+          updateItem(items, 'boundary_handling', 'warning', 'parseInt/parseFloat未进行NaN检查');
         }
       }
     }
@@ -225,17 +295,14 @@ export function inferCorrectnessFromDiff(diffText: string): CorrectnessAudit {
         lineNumber: ri.line,
       });
     }
+    updateItem(items, 'logic_error', 'warning', '删除了return语句');
     removedReturnIndices.length = 0;
   }
 
-  if (concerns.length === 0) {
-    return { level: 'pass', score: 90, concerns: [], _inferred: true };
-  }
-  const hasLogicErrors = concerns.some(c => c.type === 'logic_error');
-  if (hasLogicErrors) {
-    return { level: 'warning', score: 50, concerns, _inferred: true };
-  }
-  return { level: 'warning', score: 65, concerns, _inferred: true };
+  const score = calculateFallbackScore(items);
+  const level = itemLevel(score);
+
+  return { level, score, items, concerns, _inferred: true, _source: 'local' };
 }
 
 export function inferDependencyFromDiff(diffText: string): DependencyAudit {
@@ -346,9 +413,8 @@ export function inferArchitectureFromDiff(diffText: string): EngineeringScore {
   }
 
   highlights.push('模块边界清晰，架构变更风险较低');
-  return { score: 80, highlights, suggestions, _inferred: true };
+  return { score: 65, highlights, suggestions, _inferred: true };
 }
-
 export function inferPerformanceFromDiff(diffText: string): EngineeringScore {
   const addedLines = getAddedLines(diffText);
   const lines = diffText.split('\n');
@@ -405,14 +471,14 @@ export function inferRobustnessFromDiff(diffText: string): EngineeringScore {
 
   if (hasTryCatch && hasFinally) {
     highlights.push('代码包含完整的 try-catch-finally 错误处理链');
-    return { score: 80, highlights, suggestions, _inferred: true };
+    return { score: 70, highlights, suggestions, _inferred: true };
   }
 
   if (hasTryCatch || hasCatch) {
     if (newLineCount > 20) {
       suggestions.push('新增代码超过20行但缺少finally块，建议补充资源清理逻辑');
     }
-    return { score: 70, highlights, suggestions, _inferred: true };
+    return { score: 55, highlights, suggestions, _inferred: true };
   }
 
   if (newLineCount > 20) {

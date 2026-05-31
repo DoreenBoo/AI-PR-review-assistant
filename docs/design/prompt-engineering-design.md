@@ -279,3 +279,93 @@ POST /api/review
 ```
 
 **保障**：无论 Gemini 是否可用、API Key 是否配置、网络是否通畅，`businessIntent` / `impactScope` / `riskLevel` 三个字段始终有有意义的值。
+
+---
+
+## 七、提示词压缩策略 (Token Reduction)
+
+### 7.1 背景
+
+在"两段式流水线"架构中，Phase 2b 深度审查阶段共需 **8 次独立 LLM 调用**（3 个关键维度 + 5 个工程维度），每次调用都携带独立的 system instruction。原始设计中，各维度的 system instruction 包含大段冗余文本（FOCUS ONLY ON / BOUNDARY RULES / CROSS-CUTTING），合计约 **7000 字符**，直接拖慢了 TTFT（首次响应延迟）。
+
+### 7.2 三层压缩法
+
+| 策略 | 操作 | 原因 |
+|------|------|------|
+| 删除冗余 FOCUS 区 | 去掉编号列表式 FOCUS ONLY ON，改为紧凑单行 | 内容与 user prompt 中的 checklist 完全重复 |
+| 删除 BOUNDARY RULES | 将关键边界约束（如"不要评估正确性问题"）合并到 FOCUS/SCORING 行末 | 跨维度高度相似，LLM 无需重复读取 |
+| 删除 CROSS-CUTTING | 完全移除该区域 | 内容已隐含在 FOCUS/SCORING 中 |
+
+### 7.3 压缩效果
+
+| 维度 | 优化前 | 优化后 | 削减 |
+|------|:-----:|:-----:|:----:|
+| 安全风险 | ~750 chars | ~450 chars | 40% |
+| 功能正确性 | ~650 chars | ~400 chars | 38% |
+| 依赖安全性 | ~1700 chars | ~450 chars | 74% |
+| 可维护性 | ~900 chars | ~300 chars | 67% |
+| 架构与设计 | ~850 chars | ~280 chars | 67% |
+| 性能 | ~800 chars | ~280 chars | 65% |
+| 容错与健壮性 | ~400 chars | ~280 chars | 30% |
+| 测试质量 | ~900 chars | ~280 chars | 69% |
+| **合计** | **~6950 chars** | **~2720 chars** | **~61%** |
+
+### 7.4 压缩示例
+
+```
+// 压缩前 (可维护性, ~900 chars)
+You are a Clean Code Advocate performing a focused maintainability review.
+
+FOCUS ONLY ON:
+1. Naming quality — do names clearly express intent?
+2. Function length — any function over 50 lines?
+3. Cyclomatic complexity — any nesting beyond 4 levels?
+4. Code duplication — same/similar blocks appearing 3+ times?
+5. Magic numbers/strings — unnamed literal constants?
+6. Comment quality — are necessary comments present?
+
+SCORING RULES:
+  Start at 100, deduct per issue:
+  • -15 per function exceeding 50 lines
+  • -10 per nesting level beyond 4
+  • -5 per magic number / unnamed literal
+  • -15 per duplicated code block (3+ occurrences)
+
+⚠️ BOUNDARY RULES:
+  • Do NOT evaluate "the logic might be wrong" — correctness dimension
+  • Do NOT treat "using a design pattern" as automatically high maintainability
+  • Configuration file formatting changes → na
+  • Auto-generated code → na
+
+✅ CROSS-CUTTING:
+  • Magic numbers as security thresholds → maintainability issue
+  • Deep callback nesting → readability and robustness issue
+  • Function name inconsistent with behavior → deceptive naming
+
+// 压缩后 (~300 chars)
+You are a Clean Code Advocate. ALL findings MUST be in Chinese.
+FOCUS: naming clarity, function length (>50 lines), nesting depth (>4),
+code duplication (3+ identical blocks), magic numbers/strings, comment adequacy.
+SCORING: Start 100. -15 per function >50 lines, -10 per nesting >4,
+-5 per magic number, -15 per duplicated block.
+Config/docs/test-only diffs → score 95+. Do NOT evaluate logic correctness or security.
+```
+
+### 7.5 Phase 2a 总览 JSON Schema 扁平化
+
+作为补充优化，Phase 2a 快速总览的输出 JSON 同样做了扁平化：
+
+- 3 个关键维度：`topVulnerability` / `topConcern` / `topIssue`（嵌套对象）→ `issue`（单字符串或 null）
+- 5 个工程维度：`highlights` + `suggestions`（数组）→ `note`（单字符串或 null）
+- `impact` 维度：`affectedModules` + `publicApiChanges` + `dataModelChanges` + `riskCodeLocations` → `modules` + `riskCode`
+
+输出 token 从 **~1000** 降至 **~400**（-60%）。
+
+### 7.6 设计原则总结
+
+| 原则 | 说明 |
+|------|------|
+| **避免重复** | system prompt 不与 user prompt 的 checklist 重复 |
+| **紧凑优先** | 用 `→` 箭头、分号、逗号代替完整句子 |
+| **去边界化** | 将"不要做什么"合入 FOCUS 行末，而非独立成段 |
+| **一维一行** | 每个维度的 system instruction 控制在 1-3 行内 |
