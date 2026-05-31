@@ -261,10 +261,12 @@ const [reviewResult, setReviewResult] = useState<PrReviewResult | null>(null);
     setLoadingStep("正在解构及提取 Pull Request 代码变更...");
 
     try {
+// 1. 第一阶段 Loading 提示：直接固定为 DeepSeek
       setTimeout(() => {
-        setLoadingStep(`正在触发 ${selectedModel === 'deepseek' ? 'DeepSeek-V4-Pro' : 'Gemini 3.5-flash'} AI 审计引擎进行安全性静态扫描...`);
+        setLoadingStep("正在触发 DeepSeek-V4-Pro AI 审计引擎进行安全性静态扫描...");
       }, 1000);
 
+      // 2. 第二阶段 Loading 提示
       setTimeout(() => {
         setLoadingStep("正在生成代码重构优化建议与维度加权评分...");
       }, 2500);
@@ -365,7 +367,10 @@ const [reviewResult, setReviewResult] = useState<PrReviewResult | null>(null);
       {/* DETAILED TELESCOPIC SUBHEADER FOR SYSTEM STATUS */}
       <div className="bg-zinc-900/40 border-b border-zinc-900 px-6 py-2 flex items-center justify-between text-[10px] text-zinc-500 select-none">
         <div className="flex items-center gap-4">
-          <span className="flex items-center gap-1"><Terminal className="w-3 h-3 text-zinc-600" /> STABLE REVISION ENGINE: <strong>{selectedModel === 'deepseek' ? 'DEEPSEEK-V4-PRO' : 'GEMINI-3.5-FLASH'}</strong></span>
+        <span className="flex items-center gap-1">
+    <Terminal className="w-3 h-3 text-zinc-600" /> 
+    STABLE REVISION ENGINE: <strong>DEEPSEEK-V4-PRO</strong>
+  </span>
           <span className="hidden sm:inline text-zinc-700">|</span>
           <span className="hidden sm:inline">PROMPT SCHEMA: STRICT_JSON</span>
         </div>
@@ -488,7 +493,7 @@ const [reviewResult, setReviewResult] = useState<PrReviewResult | null>(null);
                       }}
                     >
                       <option value="deepseek">DeepSeek-V4-Pro</option>
-                      <option value="gemini">Gemini 3.5 Flash</option>
+                 
                     </select>
                     <span className={`absolute left-2.5 top-1/2 -translate-y-1/2 text-xs pointer-events-none ${
                       selectedModel === 'deepseek' ? 'text-blue-400' : 'text-amber-400'
